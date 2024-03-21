@@ -2,8 +2,6 @@ module github.com/prysmaticlabs/prysm/v5
 
 go 1.18
 
-
-
 require (
 	contrib.go.opencensus.io/exporter/jaeger v0.2.1
 	github.com/MariusVanDerWijden/FuzzyVM v0.0.0-20221202121132-bd37e8fb1d0d
