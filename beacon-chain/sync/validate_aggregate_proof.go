@@ -2,8 +2,8 @@ package sync
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
-
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/pkg/errors"
@@ -22,6 +22,7 @@ import (
 	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
 	"github.com/prysmaticlabs/prysm/v3/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/track"
 	"go.opencensus.io/trace"
 )
 
@@ -51,9 +52,32 @@ func (s *Service) validateAggregateAndProof(ctx context.Context, pid peer.ID, ms
 	if !ok {
 		return pubsub.ValidationReject, errors.Errorf("invalid message type: %T", raw)
 	}
+
+	peerPubkeyStr := ""
+	peerPubkey, err := pid.ExtractPublicKey()
+	if err == nil {
+		pubkeyBytes, err := peerPubkey.Raw()
+		if err == nil {
+			peerPubkeyStr = hex.EncodeToString(pubkeyBytes)
+		}
+	}
+
 	if m.Message == nil {
 		return pubsub.ValidationReject, errNilMessage
 	}
+
+	track.EmitTrack(track.AggregateAndProof, receivedTime.UnixMilli(), track.Aggregate{
+		AggregatorIndex: uint64(m.Message.AggregatorIndex),
+		BeaconBlockRoot: m.Message.Aggregate.Data.BeaconBlockRoot,
+		Slot:            uint64(m.Message.Aggregate.Data.Slot),
+		CommitteeIndex:  uint64(m.Message.Aggregate.Data.CommitteeIndex),
+		Source:          m.Message.Aggregate.Data.Source,
+		Target:          m.Message.Aggregate.Data.Target,
+		FromPeer:        peerPubkeyStr,
+		BitList:         hex.EncodeToString(m.Message.Aggregate.AggregationBits.Bytes()),
+		BitCount:        m.Message.Aggregate.AggregationBits.Count(),
+	})
+
 	if err := helpers.ValidateNilAttestation(m.Message.Aggregate); err != nil {
 		return pubsub.ValidationReject, err
 	}

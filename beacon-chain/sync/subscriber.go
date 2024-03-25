@@ -142,6 +142,7 @@ func (s *Service) subscribeWithBase(topic string, validator wrappedVal, handle s
 	log := log.WithField("topic", topic)
 
 	// Do not resubscribe already seen subscriptions.
+	// 避免重新订阅
 	ok := s.subHandler.topicExists(topic)
 	if ok {
 		log.Debugf("Provided topic already has an active subscription running: %s", topic)
@@ -212,6 +213,9 @@ func (s *Service) subscribeWithBase(topic string, validator wrappedVal, handle s
 
 			if msg.ReceivedFrom == s.cfg.p2p.PeerID() {
 				continue
+			}
+			if strings.Contains(topic, p2p.GossipBlockMessage) {
+				log.Infof("recv block from %s", msg.ReceivedFrom.String())
 			}
 
 			go pipeline(msg)
