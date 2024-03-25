@@ -7,16 +7,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/network/forks"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	statefeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/state"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/encoder"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/network/forks"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
 )
 
 func TestService_CanSubscribe(t *testing.T) {
@@ -24,7 +26,7 @@ func TestService_CanSubscribe(t *testing.T) {
 	currentFork := [4]byte{0x01, 0x02, 0x03, 0x04}
 	validProtocolSuffix := "/" + encoder.ProtocolSuffixSSZSnappy
 	genesisTime := time.Now()
-	var valRoot [32]byte
+	valRoot := [32]byte{}
 	digest, err := forks.CreateForkDigest(genesisTime, valRoot[:])
 	assert.NoError(t, err)
 	type test struct {
@@ -90,7 +92,7 @@ func TestService_CanSubscribe(t *testing.T) {
 		formatting := []interface{}{digest}
 
 		// Special case for attestation subnets which have a second formatting placeholder.
-		if topic == AttestationSubnetTopicFormat || topic == SyncCommitteeSubnetTopicFormat || topic == BlobSubnetTopicFormat {
+		if topic == AttestationSubnetTopicFormat || topic == SyncCommitteeSubnetTopicFormat {
 			formatting = append(formatting, 0 /* some subnet ID */)
 		}
 
@@ -202,7 +204,7 @@ func TestGossipTopicMapping_scanfcheck_GossipTopicFormattingSanityCheck(t *testi
 				if string(c) == "%" {
 					next := string(topic[i+1])
 					if next != "d" && next != "x" {
-						t.Errorf("Topic %s has formatting incompatible with scanfcheck. Only %%d and %%x are supported", topic)
+						t.Errorf("Topic %s has formatting incompatiable with scanfcheck. Only %%d and %%x are supported", topic)
 					}
 				}
 			}
@@ -214,7 +216,7 @@ func TestService_FilterIncomingSubscriptions(t *testing.T) {
 	params.SetupTestConfigCleanup(t)
 	validProtocolSuffix := "/" + encoder.ProtocolSuffixSSZSnappy
 	genesisTime := time.Now()
-	var valRoot [32]byte
+	valRoot := [32]byte{}
 	digest, err := forks.CreateForkDigest(genesisTime, valRoot[:])
 	assert.NoError(t, err)
 	type args struct {
@@ -335,16 +337,28 @@ func TestService_MonitorsStateForkUpdates(t *testing.T) {
 	params.SetupTestConfigCleanup(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	cs := startup.NewClockSynchronizer()
-	s, err := NewService(ctx, &Config{ClockWaiter: cs})
+	notifier := &mock.MockStateNotifier{}
+	s, err := NewService(ctx, &Config{
+		StateNotifier: notifier,
+	})
 	require.NoError(t, err)
 
 	require.Equal(t, false, s.isInitialized())
 
 	go s.awaitStateInitialized()
 
-	vr := bytesutil.ToBytes32(bytesutil.PadTo([]byte("genesis"), 32))
-	require.NoError(t, cs.SetClock(startup.NewClock(prysmTime.Now(), vr)))
+	for n := 0; n == 0; {
+		if ctx.Err() != nil {
+			t.Fatal(ctx.Err())
+		}
+		n = notifier.StateFeed().Send(&feed.Event{
+			Type: statefeed.Initialized,
+			Data: &statefeed.InitializedData{
+				StartTime:             prysmTime.Now(),
+				GenesisValidatorsRoot: bytesutil.PadTo([]byte("genesis"), 32),
+			},
+		})
+	}
 
 	time.Sleep(50 * time.Millisecond)
 

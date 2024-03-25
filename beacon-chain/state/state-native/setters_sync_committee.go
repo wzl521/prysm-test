@@ -1,9 +1,9 @@
 package state_native
 
 import (
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native/types"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
+	nativetypes "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/state-native/types"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/runtime/version"
 )
 
 // SetCurrentSyncCommittee for the beacon state.
@@ -16,7 +16,7 @@ func (b *BeaconState) SetCurrentSyncCommittee(val *ethpb.SyncCommittee) error {
 	}
 
 	b.currentSyncCommittee = val
-	b.markFieldAsDirty(types.CurrentSyncCommittee)
+	b.markFieldAsDirty(nativetypes.CurrentSyncCommittee)
 	return nil
 }
 
@@ -30,6 +30,6 @@ func (b *BeaconState) SetNextSyncCommittee(val *ethpb.SyncCommittee) error {
 	}
 
 	b.nextSyncCommittee = val
-	b.markFieldAsDirty(types.NextSyncCommittee)
+	b.markFieldAsDirty(nativetypes.NextSyncCommittee)
 	return nil
 }

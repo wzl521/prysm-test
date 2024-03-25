@@ -7,22 +7,23 @@ import (
 	"time"
 
 	"github.com/golang/mock/gomock"
-	"github.com/prysmaticlabs/prysm/v5/async/event"
-	mockChain "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache/depositcache"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	mockExecution "github.com/prysmaticlabs/prysm/v5/beacon-chain/execution/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/mock"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/async/event"
+	mockChain "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache/depositcache"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	statefeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/state"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	mockExecution "github.com/prysmaticlabs/prysm/v3/beacon-chain/execution/testing"
+	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/container/trie"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/mock"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 	logTest "github.com/sirupsen/logrus/hooks/test"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -60,7 +61,7 @@ func TestValidatorIndex_StateEmpty(t *testing.T) {
 }
 
 func TestWaitForActivation_ContextClosed(t *testing.T) {
-	beaconState, err := state_native.InitializeFromProtoPhase0(&ethpb.BeaconState{
+	beaconState, err := v1.InitializeFromProto(&ethpb.BeaconState{
 		Slot:       0,
 		Validators: []*ethpb.Validator{},
 	})
@@ -101,6 +102,98 @@ func TestWaitForActivation_ContextClosed(t *testing.T) {
 	exitRoutine <- true
 }
 
+func TestWaitForActivation_ValidatorOriginallyExists(t *testing.T) {
+	// This test breaks if it doesn't use mainnet config
+	params.SetupTestConfigCleanup(t)
+	params.OverrideBeaconConfig(params.MainnetConfig().Copy())
+	ctx := context.Background()
+
+	priv1, err := bls.RandKey()
+	require.NoError(t, err)
+	priv2, err := bls.RandKey()
+	require.NoError(t, err)
+
+	pubKey1 := priv1.PublicKey().Marshal()
+	pubKey2 := priv2.PublicKey().Marshal()
+
+	beaconState := &ethpb.BeaconState{
+		Slot: 4000,
+		Validators: []*ethpb.Validator{
+			{
+				ActivationEpoch:       0,
+				ExitEpoch:             params.BeaconConfig().FarFutureEpoch,
+				PublicKey:             pubKey1,
+				WithdrawalCredentials: make([]byte, 32),
+			},
+		},
+	}
+	block := util.NewBeaconBlock()
+	genesisRoot, err := block.Block.HashTreeRoot()
+	require.NoError(t, err, "Could not get signing root")
+	depData := &ethpb.Deposit_Data{
+		PublicKey:             pubKey1,
+		WithdrawalCredentials: bytesutil.PadTo([]byte("hey"), 32),
+		Signature:             make([]byte, 96),
+	}
+	domain, err := signing.ComputeDomain(params.BeaconConfig().DomainDeposit, nil, nil)
+	require.NoError(t, err)
+	signingRoot, err := signing.ComputeSigningRoot(depData, domain)
+	require.NoError(t, err)
+	depData.Signature = priv1.Sign(signingRoot[:]).Marshal()
+
+	deposit := &ethpb.Deposit{
+		Data: depData,
+	}
+	depositTrie, err := trie.NewTrie(params.BeaconConfig().DepositContractTreeDepth)
+	require.NoError(t, err, "Could not setup deposit trie")
+	depositCache, err := depositcache.New()
+	require.NoError(t, err)
+
+	root, err := depositTrie.HashTreeRoot()
+	require.NoError(t, err)
+	assert.NoError(t, depositCache.InsertDeposit(ctx, deposit, 10 /*blockNum*/, 0, root))
+	s, err := v1.InitializeFromProtoUnsafe(beaconState)
+	require.NoError(t, err)
+	vs := &Server{
+		Ctx:               context.Background(),
+		ChainStartFetcher: &mockExecution.Chain{},
+		BlockFetcher:      &mockExecution.Chain{},
+		Eth1InfoFetcher:   &mockExecution.Chain{},
+		DepositFetcher:    depositCache,
+		HeadFetcher:       &mockChain.ChainService{State: s, Root: genesisRoot[:]},
+	}
+	req := &ethpb.ValidatorActivationRequest{
+		PublicKeys: [][]byte{pubKey1, pubKey2},
+	}
+	ctrl := gomock.NewController(t)
+
+	defer ctrl.Finish()
+	mockChainStream := mock.NewMockBeaconNodeValidator_WaitForActivationServer(ctrl)
+	mockChainStream.EXPECT().Context().Return(context.Background())
+	mockChainStream.EXPECT().Send(
+		&ethpb.ValidatorActivationResponse{
+			Statuses: []*ethpb.ValidatorActivationResponse_Status{
+				{
+					PublicKey: pubKey1,
+					Status: &ethpb.ValidatorStatusResponse{
+						Status: ethpb.ValidatorStatus_ACTIVE,
+					},
+					Index: 0,
+				},
+				{
+					PublicKey: pubKey2,
+					Status: &ethpb.ValidatorStatusResponse{
+						ActivationEpoch: params.BeaconConfig().FarFutureEpoch,
+					},
+					Index: nonExistentIndex,
+				},
+			},
+		},
+	).Return(nil)
+
+	require.NoError(t, vs.WaitForActivation(req, mockChainStream), "Could not setup wait for activation stream")
+}
+
 func TestWaitForActivation_MultipleStatuses(t *testing.T) {
 	priv1, err := bls.RandKey()
 	require.NoError(t, err)
@@ -138,7 +231,7 @@ func TestWaitForActivation_MultipleStatuses(t *testing.T) {
 	block := util.NewBeaconBlock()
 	genesisRoot, err := block.Block.HashTreeRoot()
 	require.NoError(t, err, "Could not get signing root")
-	s, err := state_native.InitializeFromProtoUnsafePhase0(beaconState)
+	s, err := v1.InitializeFromProtoUnsafe(beaconState)
 	require.NoError(t, err)
 	vs := &Server{
 		Ctx:               context.Background(),
@@ -190,14 +283,13 @@ func TestWaitForActivation_MultipleStatuses(t *testing.T) {
 func TestWaitForChainStart_ContextClosed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	chainService := &mockChain.ChainService{}
-	server := &Server{
+	Server := &Server{
 		Ctx: ctx,
 		ChainStartFetcher: &mockExecution.FaultyExecutionChain{
 			ChainFeed: new(event.Feed),
 		},
 		StateNotifier: chainService.StateNotifier(),
 		HeadFetcher:   chainService,
-		ClockWaiter:   startup.NewClockSynchronizer(),
 	}
 
 	exitRoutine := make(chan bool)
@@ -206,7 +298,7 @@ func TestWaitForChainStart_ContextClosed(t *testing.T) {
 	mockStream := mock.NewMockBeaconNodeValidator_WaitForChainStartServer(ctrl)
 	mockStream.EXPECT().Context().Return(ctx)
 	go func(tt *testing.T) {
-		err := server.WaitForChainStart(&emptypb.Empty{}, mockStream)
+		err := Server.WaitForChainStart(&emptypb.Empty{}, mockStream)
 		assert.ErrorContains(tt, "Context canceled", err)
 		<-exitRoutine
 	}(t)
@@ -245,9 +337,11 @@ func TestWaitForChainStart_AlreadyStarted(t *testing.T) {
 }
 
 func TestWaitForChainStart_HeadStateDoesNotExist(t *testing.T) {
+	genesisValidatorsRoot := params.BeaconConfig().ZeroHash
+
 	// Set head state to nil
 	chainService := &mockChain.ChainService{State: nil}
-	gs := startup.NewClockSynchronizer()
+	notifier := chainService.StateNotifier()
 	Server := &Server{
 		Ctx: context.Background(),
 		ChainStartFetcher: &mockExecution.Chain{
@@ -255,7 +349,6 @@ func TestWaitForChainStart_HeadStateDoesNotExist(t *testing.T) {
 		},
 		StateNotifier: chainService.StateNotifier(),
 		HeadFetcher:   chainService,
-		ClockWaiter:   gs,
 	}
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -268,7 +361,15 @@ func TestWaitForChainStart_HeadStateDoesNotExist(t *testing.T) {
 		assert.NoError(t, Server.WaitForChainStart(&emptypb.Empty{}, mockStream), "Could not call RPC method")
 		wg.Done()
 	}()
-
+	// Simulate a late state initialization event, so that
+	// method is able to handle race condition here.
+	notifier.StateFeed().Send(&feed.Event{
+		Type: statefeed.Initialized,
+		Data: &statefeed.InitializedData{
+			StartTime:             time.Unix(0, 0),
+			GenesisValidatorsRoot: genesisValidatorsRoot[:],
+		},
+	})
 	util.WaitTimeout(wg, time.Second)
 }
 
@@ -277,8 +378,6 @@ func TestWaitForChainStart_NotStartedThenLogFired(t *testing.T) {
 
 	genesisValidatorsRoot := bytesutil.ToBytes32([]byte("validators"))
 	chainService := &mockChain.ChainService{}
-	gs := startup.NewClockSynchronizer()
-
 	Server := &Server{
 		Ctx: context.Background(),
 		ChainStartFetcher: &mockExecution.FaultyExecutionChain{
@@ -286,7 +385,6 @@ func TestWaitForChainStart_NotStartedThenLogFired(t *testing.T) {
 		},
 		StateNotifier: chainService.StateNotifier(),
 		HeadFetcher:   chainService,
-		ClockWaiter:   gs,
 	}
 	exitRoutine := make(chan bool)
 	ctrl := gomock.NewController(t)
@@ -306,61 +404,16 @@ func TestWaitForChainStart_NotStartedThenLogFired(t *testing.T) {
 	}(t)
 
 	// Send in a loop to ensure it is delivered (busy wait for the service to subscribe to the state feed).
-	require.NoError(t, gs.SetClock(startup.NewClock(time.Unix(0, 0), genesisValidatorsRoot)))
+	for sent := 0; sent == 0; {
+		sent = Server.StateNotifier.StateFeed().Send(&feed.Event{
+			Type: statefeed.Initialized,
+			Data: &statefeed.InitializedData{
+				StartTime:             time.Unix(0, 0),
+				GenesisValidatorsRoot: genesisValidatorsRoot[:],
+			},
+		})
+	}
 
 	exitRoutine <- true
 	require.LogsContain(t, hook, "Sending genesis time")
-}
-
-func TestServer_DomainData_Exits(t *testing.T) {
-	params.SetupTestConfigCleanup(t)
-	cfg := params.BeaconConfig().Copy()
-	cfg.ForkVersionSchedule = map[[4]byte]primitives.Epoch{
-		[4]byte(cfg.GenesisForkVersion):   primitives.Epoch(0),
-		[4]byte(cfg.AltairForkVersion):    primitives.Epoch(5),
-		[4]byte(cfg.BellatrixForkVersion): primitives.Epoch(10),
-		[4]byte(cfg.CapellaForkVersion):   primitives.Epoch(15),
-		[4]byte(cfg.DenebForkVersion):     primitives.Epoch(20),
-	}
-	params.OverrideBeaconConfig(cfg)
-	beaconState := &ethpb.BeaconStateBellatrix{
-		Slot: 4000,
-	}
-	block := util.NewBeaconBlock()
-	genesisRoot, err := block.Block.HashTreeRoot()
-	require.NoError(t, err, "Could not get signing root")
-	s, err := state_native.InitializeFromProtoUnsafeBellatrix(beaconState)
-	require.NoError(t, err)
-	vs := &Server{
-		Ctx:               context.Background(),
-		ChainStartFetcher: &mockExecution.Chain{},
-		HeadFetcher:       &mockChain.ChainService{State: s, Root: genesisRoot[:]},
-	}
-
-	reqDomain, err := vs.DomainData(context.Background(), &ethpb.DomainRequest{
-		Epoch:  100,
-		Domain: params.BeaconConfig().DomainDeposit[:],
-	})
-	assert.NoError(t, err)
-	wantedDomain, err := signing.ComputeDomain(params.BeaconConfig().DomainDeposit, params.BeaconConfig().DenebForkVersion, make([]byte, 32))
-	assert.NoError(t, err)
-	assert.DeepEqual(t, reqDomain.SignatureDomain, wantedDomain)
-
-	beaconStateNew := &ethpb.BeaconStateDeneb{
-		Slot: 4000,
-	}
-	s, err = state_native.InitializeFromProtoUnsafeDeneb(beaconStateNew)
-	require.NoError(t, err)
-	vs.HeadFetcher = &mockChain.ChainService{State: s, Root: genesisRoot[:]}
-
-	reqDomain, err = vs.DomainData(context.Background(), &ethpb.DomainRequest{
-		Epoch:  100,
-		Domain: params.BeaconConfig().DomainVoluntaryExit[:],
-	})
-	require.NoError(t, err)
-
-	wantedDomain, err = signing.ComputeDomain(params.BeaconConfig().DomainVoluntaryExit, params.BeaconConfig().CapellaForkVersion, make([]byte, 32))
-	require.NoError(t, err)
-
-	assert.DeepEqual(t, reqDomain.SignatureDomain, wantedDomain)
 }

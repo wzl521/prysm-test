@@ -5,8 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/prysmaticlabs/prysm/v5/api/client"
-	"github.com/prysmaticlabs/prysm/v5/api/client/beacon"
+	"github.com/prysmaticlabs/prysm/v3/api/client/beacon"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
@@ -20,12 +19,7 @@ var downloadCmd = &cli.Command{
 	Name:    "download",
 	Aliases: []string{"dl"},
 	Usage:   "Download the latest finalized state and the most recent block it integrates. To be used for checkpoint sync.",
-	Action: func(cliCtx *cli.Context) error {
-		if err := cliActionDownload(cliCtx); err != nil {
-			log.WithError(err).Fatal("Could not download checkpoint-sync data")
-		}
-		return nil
-	},
+	Action:  cliActionDownload,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:        "beacon-node-host",
@@ -46,7 +40,7 @@ func cliActionDownload(_ *cli.Context) error {
 	ctx := context.Background()
 	f := downloadFlags
 
-	opts := []client.ClientOpt{client.WithTimeout(f.Timeout)}
+	opts := []beacon.ClientOpt{beacon.WithTimeout(f.Timeout)}
 	client, err := beacon.NewClient(downloadFlags.BeaconNodeHost, opts...)
 	if err != nil {
 		return err
@@ -66,13 +60,13 @@ func cliActionDownload(_ *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("saved ssz-encoded block to %s", blockPath)
+	log.Printf("saved ssz-encoded block to to %s", blockPath)
 
 	statePath, err := od.SaveState(cwd)
 	if err != nil {
 		return err
 	}
-	log.Printf("saved ssz-encoded state to %s", statePath)
+	log.Printf("saved ssz-encoded state to to %s", statePath)
 
 	return nil
 }

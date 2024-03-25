@@ -9,27 +9,22 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/async/event"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/epoch/precompute"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed"
-	blockfeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/block"
-	opfeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/operation"
-	statefeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/state"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/das"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/forkchoice"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	forkchoice2 "github.com/prysmaticlabs/prysm/v5/consensus-types/forkchoice"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	enginev1 "github.com/prysmaticlabs/prysm/v5/proto/engine/v1"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/async/event"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/epoch/precompute"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	blockfeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/block"
+	opfeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/operation"
+	statefeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/state"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/forkchoice"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 	"github.com/sirupsen/logrus"
 )
 
@@ -37,7 +32,6 @@ var ErrNilState = errors.New("nil state")
 
 // ChainService defines the mock interface for testing
 type ChainService struct {
-	NotFinalized                bool
 	Optimistic                  bool
 	ValidAttestation            bool
 	ValidatorsRoot              [32]byte
@@ -45,7 +39,7 @@ type ChainService struct {
 	FinalizedCheckPoint         *ethpb.Checkpoint
 	CurrentJustifiedCheckPoint  *ethpb.Checkpoint
 	PreviousJustifiedCheckPoint *ethpb.Checkpoint
-	Slot                        *primitives.Slot // Pointer because 0 is a useful value, so checking against it can be incorrect.
+	Slot                        *types.Slot // Pointer because 0 is a useful value, so checking against it can be incorrect.
 	Balance                     *precompute.Balance
 	CanonicalRoots              map[[32]byte]bool
 	Fork                        *ethpb.Fork
@@ -53,11 +47,11 @@ type ChainService struct {
 	InitSyncBlockRoots          map[[32]byte]bool
 	DB                          db.Database
 	State                       state.BeaconState
-	Block                       interfaces.ReadOnlySignedBeaconBlock
+	Block                       interfaces.SignedBeaconBlock
 	VerifyBlkDescendantErr      error
 	stateNotifier               statefeed.Notifier
-	BlocksReceived              []interfaces.ReadOnlySignedBeaconBlock
-	SyncCommitteeIndices        []primitives.CommitteeIndex
+	BlocksReceived              []interfaces.SignedBeaconBlock
+	SyncCommitteeIndices        []types.CommitteeIndex
 	blockNotifier               blockfeed.Notifier
 	opNotifier                  opfeed.Notifier
 	Root                        []byte
@@ -70,16 +64,11 @@ type ChainService struct {
 	ReceiveBlockMockErr         error
 	OptimisticCheckRootReceived [32]byte
 	FinalizedRoots              map[[32]byte]bool
-	OptimisticRoots             map[[32]byte]bool
-	BlockSlot                   primitives.Slot
-	SyncingRoot                 [32]byte
-	Blobs                       []blocks.VerifiedROBlob
-	TargetRoot                  [32]byte
 }
 
-func (s *ChainService) Ancestor(ctx context.Context, root []byte, slot primitives.Slot) ([]byte, error) {
-	r, err := s.ForkChoiceStore.AncestorRoot(ctx, bytesutil.ToBytes32(root), slot)
-	return r[:], err
+// ForkChoicer mocks the same method in the chain service
+func (s *ChainService) ForkChoicer() forkchoice.ForkChoicer {
+	return s.ForkChoiceStore
 }
 
 // StateNotifier mocks the same method in the chain service.
@@ -180,21 +169,12 @@ func (mon *MockOperationNotifier) OperationFeed() *event.Feed {
 	return mon.feed
 }
 
-// MockChecker is a mock sync checker.
-type MockChecker struct{}
-
-// Synced returns true.
-func (_ MockChecker) Synced() bool {
-	return true
-}
-
 // ReceiveBlockInitialSync mocks ReceiveBlockInitialSync method in chain service.
-func (s *ChainService) ReceiveBlockInitialSync(ctx context.Context, block interfaces.ReadOnlySignedBeaconBlock, _ [32]byte) error {
+func (s *ChainService) ReceiveBlockInitialSync(ctx context.Context, block interfaces.SignedBeaconBlock, _ [32]byte) error {
 	if s.State == nil {
 		return ErrNilState
 	}
-	parentRoot := block.Block().ParentRoot()
-	if !bytes.Equal(s.Root, parentRoot[:]) {
+	if !bytes.Equal(s.Root, block.Block().ParentRoot()) {
 		return errors.Errorf("wanted %#x but got %#x", s.Root, block.Block().ParentRoot())
 	}
 	if err := s.State.SetSlot(block.Block().Slot()); err != nil {
@@ -217,13 +197,12 @@ func (s *ChainService) ReceiveBlockInitialSync(ctx context.Context, block interf
 }
 
 // ReceiveBlockBatch processes blocks in batches from initial-sync.
-func (s *ChainService) ReceiveBlockBatch(ctx context.Context, blks []blocks.ROBlock, _ das.AvailabilityStore) error {
+func (s *ChainService) ReceiveBlockBatch(ctx context.Context, blks []interfaces.SignedBeaconBlock, _ [][32]byte) error {
 	if s.State == nil {
 		return ErrNilState
 	}
 	for _, b := range blks {
-		parentRoot := b.Block().ParentRoot()
-		if !bytes.Equal(s.Root, parentRoot[:]) {
+		if !bytes.Equal(s.Root, b.Block().ParentRoot()) {
 			return errors.Errorf("wanted %#x but got %#x", s.Root, b.Block().ParentRoot())
 		}
 		if err := s.State.SetSlot(b.Block().Slot()); err != nil {
@@ -247,15 +226,14 @@ func (s *ChainService) ReceiveBlockBatch(ctx context.Context, blks []blocks.ROBl
 }
 
 // ReceiveBlock mocks ReceiveBlock method in chain service.
-func (s *ChainService) ReceiveBlock(ctx context.Context, block interfaces.ReadOnlySignedBeaconBlock, _ [32]byte, _ das.AvailabilityStore) error {
+func (s *ChainService) ReceiveBlock(ctx context.Context, block interfaces.SignedBeaconBlock, _ [32]byte) error {
 	if s.ReceiveBlockMockErr != nil {
 		return s.ReceiveBlockMockErr
 	}
 	if s.State == nil {
 		return ErrNilState
 	}
-	parentRoot := block.Block().ParentRoot()
-	if !bytes.Equal(s.Root, parentRoot[:]) {
+	if !bytes.Equal(s.Root, block.Block().ParentRoot()) {
 		return errors.Errorf("wanted %#x but got %#x", s.Root, block.Block().ParentRoot())
 	}
 	if err := s.State.SetSlot(block.Block().Slot()); err != nil {
@@ -278,7 +256,7 @@ func (s *ChainService) ReceiveBlock(ctx context.Context, block interfaces.ReadOn
 }
 
 // HeadSlot mocks HeadSlot method in chain service.
-func (s *ChainService) HeadSlot() primitives.Slot {
+func (s *ChainService) HeadSlot() types.Slot {
 	if s.State == nil {
 		return 0
 	}
@@ -294,17 +272,12 @@ func (s *ChainService) HeadRoot(_ context.Context) ([]byte, error) {
 }
 
 // HeadBlock mocks HeadBlock method in chain service.
-func (s *ChainService) HeadBlock(context.Context) (interfaces.ReadOnlySignedBeaconBlock, error) {
+func (s *ChainService) HeadBlock(context.Context) (interfaces.SignedBeaconBlock, error) {
 	return s.Block, nil
 }
 
 // HeadState mocks HeadState method in chain service.
 func (s *ChainService) HeadState(context.Context) (state.BeaconState, error) {
-	return s.State, nil
-}
-
-// HeadStateReadOnly mocks HeadStateReadOnly method in chain service.
-func (s *ChainService) HeadStateReadOnly(context.Context) (state.ReadOnlyBeaconState, error) {
 	return s.State, nil
 }
 
@@ -329,19 +302,19 @@ func (s *ChainService) PreviousJustifiedCheckpt() *ethpb.Checkpoint {
 }
 
 // ReceiveAttestation mocks ReceiveAttestation method in chain service.
-func (*ChainService) ReceiveAttestation(_ context.Context, _ *ethpb.Attestation) error {
+func (_ *ChainService) ReceiveAttestation(_ context.Context, _ *ethpb.Attestation) error {
 	return nil
 }
 
 // AttestationTargetState mocks AttestationTargetState method in chain service.
-func (s *ChainService) AttestationTargetState(_ context.Context, _ *ethpb.Checkpoint) (state.ReadOnlyBeaconState, error) {
+func (s *ChainService) AttestationTargetState(_ context.Context, _ *ethpb.Checkpoint) (state.BeaconState, error) {
 	return s.State, nil
 }
 
 // HeadValidatorsIndices mocks the same method in the chain service.
-func (s *ChainService) HeadValidatorsIndices(ctx context.Context, epoch primitives.Epoch) ([]primitives.ValidatorIndex, error) {
+func (s *ChainService) HeadValidatorsIndices(ctx context.Context, epoch types.Epoch) ([]types.ValidatorIndex, error) {
 	if s.State == nil {
-		return []primitives.ValidatorIndex{}, nil
+		return []types.ValidatorIndex{}, nil
 	}
 	return helpers.ActiveValidatorIndices(ctx, s.State, epoch)
 }
@@ -362,11 +335,11 @@ func (s *ChainService) GenesisValidatorsRoot() [32]byte {
 }
 
 // CurrentSlot mocks the same method in the chain service.
-func (s *ChainService) CurrentSlot() primitives.Slot {
+func (s *ChainService) CurrentSlot() types.Slot {
 	if s.Slot != nil {
 		return *s.Slot
 	}
-	return primitives.Slot(uint64(time.Now().Unix()-s.Genesis.Unix()) / params.BeaconConfig().SecondsPerSlot)
+	return types.Slot(uint64(time.Now().Unix()-s.Genesis.Unix()) / params.BeaconConfig().SecondsPerSlot)
 }
 
 // Participation mocks the same method in the chain service.
@@ -403,65 +376,73 @@ func (s *ChainService) HasBlock(ctx context.Context, rt [32]byte) bool {
 	return s.InitSyncBlockRoots[rt]
 }
 
-// RecentBlockSlot mocks the same method in the chain service.
-func (s *ChainService) RecentBlockSlot([32]byte) (primitives.Slot, error) {
-	return s.BlockSlot, nil
-}
-
 // HeadGenesisValidatorsRoot mocks HeadGenesisValidatorsRoot method in chain service.
-func (*ChainService) HeadGenesisValidatorsRoot() [32]byte {
+func (_ *ChainService) HeadGenesisValidatorsRoot() [32]byte {
 	return [32]byte{}
 }
 
+// VerifyFinalizedBlkDescendant mocks VerifyBlkDescendant and always returns nil.
+func (s *ChainService) VerifyFinalizedBlkDescendant(_ context.Context, _ [32]byte) error {
+	return s.VerifyBlkDescendantErr
+}
+
 // VerifyLmdFfgConsistency mocks VerifyLmdFfgConsistency and always returns nil.
-func (*ChainService) VerifyLmdFfgConsistency(_ context.Context, a *ethpb.Attestation) error {
+func (_ *ChainService) VerifyLmdFfgConsistency(_ context.Context, a *ethpb.Attestation) error {
 	if !bytes.Equal(a.Data.BeaconBlockRoot, a.Data.Target.Root) {
 		return errors.New("LMD and FFG miss matched")
 	}
 	return nil
 }
 
+// VerifyFinalizedConsistency mocks VerifyFinalizedConsistency and always returns nil.
+func (s *ChainService) VerifyFinalizedConsistency(_ context.Context, r []byte) error {
+	if !bytes.Equal(r, s.FinalizedCheckPoint.Root) {
+		return errors.New("Root and finalized store are not consistent")
+	}
+	return nil
+}
+
 // ChainHeads mocks ChainHeads and always return nil.
-func (*ChainService) ChainHeads() ([][32]byte, []primitives.Slot) {
+func (_ *ChainService) ChainHeads() ([][32]byte, []types.Slot) {
 	return [][32]byte{
 			bytesutil.ToBytes32(bytesutil.PadTo([]byte("foo"), 32)),
 			bytesutil.ToBytes32(bytesutil.PadTo([]byte("bar"), 32)),
 		},
-		[]primitives.Slot{0, 1}
+		[]types.Slot{0, 1}
 }
 
 // HeadPublicKeyToValidatorIndex mocks HeadPublicKeyToValidatorIndex and always return 0 and true.
-func (*ChainService) HeadPublicKeyToValidatorIndex(_ [fieldparams.BLSPubkeyLength]byte) (primitives.ValidatorIndex, bool) {
+func (_ *ChainService) HeadPublicKeyToValidatorIndex(_ [fieldparams.BLSPubkeyLength]byte) (types.ValidatorIndex, bool) {
 	return 0, true
 }
 
 // HeadValidatorIndexToPublicKey mocks HeadValidatorIndexToPublicKey and always return empty and nil.
-func (s *ChainService) HeadValidatorIndexToPublicKey(_ context.Context, _ primitives.ValidatorIndex) ([fieldparams.BLSPubkeyLength]byte, error) {
+func (s *ChainService) HeadValidatorIndexToPublicKey(_ context.Context, _ types.ValidatorIndex) ([fieldparams.BLSPubkeyLength]byte, error) {
 	return s.PublicKey, nil
 }
 
 // HeadSyncCommitteeIndices mocks HeadSyncCommitteeIndices and always return `HeadNextSyncCommitteeIndices`.
-func (s *ChainService) HeadSyncCommitteeIndices(_ context.Context, _ primitives.ValidatorIndex, _ primitives.Slot) ([]primitives.CommitteeIndex, error) {
+func (s *ChainService) HeadSyncCommitteeIndices(_ context.Context, _ types.ValidatorIndex, _ types.Slot) ([]types.CommitteeIndex, error) {
 	return s.SyncCommitteeIndices, nil
 }
 
 // HeadSyncCommitteePubKeys mocks HeadSyncCommitteePubKeys and always return empty nil.
-func (s *ChainService) HeadSyncCommitteePubKeys(_ context.Context, _ primitives.Slot, _ primitives.CommitteeIndex) ([][]byte, error) {
+func (s *ChainService) HeadSyncCommitteePubKeys(_ context.Context, _ types.Slot, _ types.CommitteeIndex) ([][]byte, error) {
 	return s.SyncCommitteePubkeys, nil
 }
 
 // HeadSyncCommitteeDomain mocks HeadSyncCommitteeDomain and always return empty nil.
-func (s *ChainService) HeadSyncCommitteeDomain(_ context.Context, _ primitives.Slot) ([]byte, error) {
+func (s *ChainService) HeadSyncCommitteeDomain(_ context.Context, _ types.Slot) ([]byte, error) {
 	return s.SyncCommitteeDomain, nil
 }
 
 // HeadSyncSelectionProofDomain mocks HeadSyncSelectionProofDomain and always return empty nil.
-func (s *ChainService) HeadSyncSelectionProofDomain(_ context.Context, _ primitives.Slot) ([]byte, error) {
+func (s *ChainService) HeadSyncSelectionProofDomain(_ context.Context, _ types.Slot) ([]byte, error) {
 	return s.SyncSelectionProofDomain, nil
 }
 
 // HeadSyncContributionProofDomain mocks HeadSyncContributionProofDomain and always return empty nil.
-func (s *ChainService) HeadSyncContributionProofDomain(_ context.Context, _ primitives.Slot) ([]byte, error) {
+func (s *ChainService) HeadSyncContributionProofDomain(_ context.Context, _ types.Slot) ([]byte, error) {
 	return s.SyncContributionProofDomain, nil
 }
 
@@ -470,165 +451,19 @@ func (s *ChainService) IsOptimistic(_ context.Context) (bool, error) {
 	return s.Optimistic, nil
 }
 
-// InForkchoice mocks the same method in the chain service
-func (s *ChainService) InForkchoice(_ [32]byte) bool {
-	return !s.NotFinalized
-}
-
 // IsOptimisticForRoot mocks the same method in the chain service.
 func (s *ChainService) IsOptimisticForRoot(_ context.Context, root [32]byte) (bool, error) {
 	s.OptimisticCheckRootReceived = root
-	return s.OptimisticRoots[root], nil
+	return s.Optimistic, nil
 }
 
 // UpdateHead mocks the same method in the chain service.
-func (s *ChainService) UpdateHead(ctx context.Context, slot primitives.Slot) {
-	ojc := &ethpb.Checkpoint{}
-	st, root, err := prepareForkchoiceState(ctx, slot, bytesutil.ToBytes32(s.Root), [32]byte{}, [32]byte{}, ojc, ojc)
-	if err != nil {
-		logrus.WithError(err).Error("could not update head")
-	}
-	err = s.ForkChoiceStore.InsertNode(ctx, st, root)
-	if err != nil {
-		logrus.WithError(err).Error("could not insert node to forkchoice")
-	}
-}
+func (s *ChainService) UpdateHead(_ context.Context) error { return nil }
 
 // ReceiveAttesterSlashing mocks the same method in the chain service.
-func (*ChainService) ReceiveAttesterSlashing(context.Context, *ethpb.AttesterSlashing) {}
+func (s *ChainService) ReceiveAttesterSlashing(context.Context, *ethpb.AttesterSlashing) {}
 
 // IsFinalized mocks the same method in the chain service.
 func (s *ChainService) IsFinalized(_ context.Context, blockRoot [32]byte) bool {
 	return s.FinalizedRoots[blockRoot]
-}
-
-// prepareForkchoiceState prepares a beacon state with the given data to mock
-// insert into forkchoice
-func prepareForkchoiceState(
-	_ context.Context,
-	slot primitives.Slot,
-	blockRoot [32]byte,
-	parentRoot [32]byte,
-	payloadHash [32]byte,
-	justified *ethpb.Checkpoint,
-	finalized *ethpb.Checkpoint,
-) (state.BeaconState, [32]byte, error) {
-	blockHeader := &ethpb.BeaconBlockHeader{
-		ParentRoot: parentRoot[:],
-	}
-
-	executionHeader := &enginev1.ExecutionPayloadHeader{
-		BlockHash: payloadHash[:],
-	}
-
-	base := &ethpb.BeaconStateBellatrix{
-		Slot:                         slot,
-		RandaoMixes:                  make([][]byte, params.BeaconConfig().EpochsPerHistoricalVector),
-		BlockRoots:                   make([][]byte, 1),
-		CurrentJustifiedCheckpoint:   justified,
-		FinalizedCheckpoint:          finalized,
-		LatestExecutionPayloadHeader: executionHeader,
-		LatestBlockHeader:            blockHeader,
-	}
-
-	base.BlockRoots[0] = append(base.BlockRoots[0], blockRoot[:]...)
-	st, err := state_native.InitializeFromProtoBellatrix(base)
-	return st, blockRoot, err
-}
-
-// CachedHeadRoot mocks the same method in the chain service
-func (s *ChainService) CachedHeadRoot() [32]byte {
-	if s.ForkChoiceStore != nil {
-		return s.ForkChoiceStore.CachedHeadRoot()
-	}
-	return [32]byte{}
-}
-
-// GetProposerHead mocks the same method in the chain service
-func (s *ChainService) GetProposerHead() [32]byte {
-	if s.ForkChoiceStore != nil {
-		return s.ForkChoiceStore.GetProposerHead()
-	}
-	return [32]byte{}
-}
-
-// SetForkChoiceGenesisTime mocks the same method in the chain service
-func (s *ChainService) SetForkChoiceGenesisTime(timestamp uint64) {
-	if s.ForkChoiceStore != nil {
-		s.ForkChoiceStore.SetGenesisTime(timestamp)
-	}
-}
-
-// ReceivedBlocksLastEpoch mocks the same method in the chain service
-func (s *ChainService) ReceivedBlocksLastEpoch() (uint64, error) {
-	if s.ForkChoiceStore != nil {
-		return s.ForkChoiceStore.ReceivedBlocksLastEpoch()
-	}
-	return 0, nil
-}
-
-// HighestReceivedBlockSlot mocks the same method in the chain service
-func (s *ChainService) HighestReceivedBlockSlot() primitives.Slot {
-	if s.ForkChoiceStore != nil {
-		return s.ForkChoiceStore.HighestReceivedBlockSlot()
-	}
-	return 0
-}
-
-// InsertNode mocks the same method in the chain service
-func (s *ChainService) InsertNode(ctx context.Context, st state.BeaconState, root [32]byte) error {
-	if s.ForkChoiceStore != nil {
-		return s.ForkChoiceStore.InsertNode(ctx, st, root)
-	}
-	return nil
-}
-
-// ForkChoiceDump mocks the same method in the chain service
-func (s *ChainService) ForkChoiceDump(ctx context.Context) (*forkchoice2.Dump, error) {
-	if s.ForkChoiceStore != nil {
-		return s.ForkChoiceStore.ForkChoiceDump(ctx)
-	}
-	return nil, nil
-}
-
-// NewSlot mocks the same method in the chain service
-func (s *ChainService) NewSlot(ctx context.Context, slot primitives.Slot) error {
-	if s.ForkChoiceStore != nil {
-		return s.ForkChoiceStore.NewSlot(ctx, slot)
-	}
-	return nil
-}
-
-// ProposerBoost mocks the same method in the chain service
-func (s *ChainService) ProposerBoost() [32]byte {
-	if s.ForkChoiceStore != nil {
-		return s.ForkChoiceStore.ProposerBoost()
-	}
-	return [32]byte{}
-}
-
-// FinalizedBlockHash mocks the same method in the chain service
-func (*ChainService) FinalizedBlockHash() [32]byte {
-	return [32]byte{}
-}
-
-// UnrealizedJustifiedPayloadBlockHash mocks the same method in the chain service
-func (*ChainService) UnrealizedJustifiedPayloadBlockHash() [32]byte {
-	return [32]byte{}
-}
-
-// BlockBeingSynced mocks the same method in the chain service
-func (c *ChainService) BlockBeingSynced(root [32]byte) bool {
-	return root == c.SyncingRoot
-}
-
-// ReceiveBlob implements the same method in the chain service
-func (c *ChainService) ReceiveBlob(_ context.Context, b blocks.VerifiedROBlob) error {
-	c.Blobs = append(c.Blobs, b)
-	return nil
-}
-
-// TargetRootForEpoch mocks the same method in the chain service
-func (c *ChainService) TargetRootForEpoch(_ [32]byte, _ primitives.Epoch) ([32]byte, error) {
-	return c.TargetRoot, nil
 }

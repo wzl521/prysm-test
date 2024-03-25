@@ -2,17 +2,22 @@ package p2p
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers/peerdata"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
+	"github.com/prysmaticlabs/prysm/v3/track"
+
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/peers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/peers/peerdata"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
 	"github.com/sirupsen/logrus"
 )
 
@@ -59,6 +64,19 @@ func (s *Service) AddConnectionHandler(reqFunc, goodByeFunc func(ctx context.Con
 	s.host.Network().Notify(&network.NotifyBundle{
 		ConnectedF: func(net network.Network, conn network.Conn) {
 			remotePeer := conn.RemotePeer()
+
+			agentVersion := ""
+			if av, err := s.host.Peerstore().Get(remotePeer, "AgentVersion"); err == nil {
+				agentVersion = av.(string)
+			}
+
+			pubkeyStr := ``
+			if pubkey, err := remotePeer.ExtractPublicKey(); err == nil {
+				if pubkeyBytes, err := pubkey.Raw(); err == nil {
+					pubkeyStr = hex.EncodeToString(pubkeyBytes)
+				}
+			}
+
 			disconnectFromPeer := func() {
 				s.peers.SetConnectionState(remotePeer, peers.PeerDisconnecting)
 				// Only attempt a goodbye if we are still connected to the peer.
@@ -68,6 +86,25 @@ func (s *Service) AddConnectionHandler(reqFunc, goodByeFunc func(ctx context.Con
 					}
 				}
 				s.peers.SetConnectionState(remotePeer, peers.PeerDisconnected)
+
+				enrURL := ""
+
+				enr, err := s.peers.ENR(conn.RemotePeer())
+				if err == nil {
+					enc, _ := rlp.EncodeToBytes(&enr) // always succeeds because record is valid
+					b64 := base64.RawURLEncoding.EncodeToString(enc)
+					enrURL = "enr:" + b64
+				}
+
+				track.EmitTrack(track.BeaconPeer, time.Now().UnixMilli(), track.BeaconPeerMessage{
+					AgentVersion: agentVersion,
+					Type:         0,
+					MultiAddr:    peerMultiaddrString(conn),
+					Pubkey:       pubkeyStr,
+					Direction:    uint8(conn.Stat().Direction),
+					ENR:          enrURL,
+				})
+				// peer disconnected
 			}
 			// Connection handler must be non-blocking as part of libp2p design.
 			go func() {
@@ -92,6 +129,25 @@ func (s *Service) AddConnectionHandler(reqFunc, goodByeFunc func(ctx context.Con
 				}
 				validPeerConnection := func() {
 					s.peers.SetConnectionState(conn.RemotePeer(), peers.PeerConnected)
+
+					enrURL := ""
+
+					enr, err := s.peers.ENR(conn.RemotePeer())
+					if err == nil {
+						enc, _ := rlp.EncodeToBytes(&enr) // always succeeds because record is valid
+						b64 := base64.RawURLEncoding.EncodeToString(enc)
+						enrURL = "enr:" + b64
+					}
+
+					track.EmitTrack(track.BeaconPeer, time.Now().UnixMilli(), track.BeaconPeerMessage{
+						AgentVersion: agentVersion,
+						Type:         1,
+						MultiAddr:    peerMultiaddrString(conn),
+						Pubkey:       pubkeyStr,
+						Direction:    uint8(conn.Stat().Direction),
+						ENR:          enrURL,
+					})
+					// [track] peer connected
 					// Go through the handshake process.
 					log.WithFields(logrus.Fields{
 						"direction":   conn.Stat().Direction,
@@ -170,6 +226,38 @@ func (s *Service) AddDisconnectionHandler(handler func(ctx context.Context, id p
 				if err := handler(context.TODO(), conn.RemotePeer()); err != nil {
 					log.WithError(err).Error("Disconnect handler failed")
 				}
+
+				agentVersion := ""
+				if av, err := s.host.Peerstore().Get(conn.RemotePeer(), "AgentVersion"); err == nil {
+					agentVersion = av.(string)
+				}
+
+				pubkeyStr := ``
+				if pubkey, err := conn.RemotePeer().ExtractPublicKey(); err == nil {
+					if pubkeyBytes, err := pubkey.Raw(); err == nil {
+						pubkeyStr = hex.EncodeToString(pubkeyBytes)
+					}
+				}
+
+				enrURL := ""
+
+				enr, err := s.peers.ENR(conn.RemotePeer())
+				if err == nil {
+					enc, _ := rlp.EncodeToBytes(&enr) // always succeeds because record is valid
+					b64 := base64.RawURLEncoding.EncodeToString(enc)
+					enrURL = "enr:" + b64
+				}
+
+				// [track] peer disconnected
+				track.EmitTrack(track.BeaconPeer, time.Now().UnixMilli(), track.BeaconPeerMessage{
+					AgentVersion: agentVersion,
+					Type:         0,
+					MultiAddr:    peerMultiaddrString(conn),
+					Pubkey:       pubkeyStr,
+					Direction:    uint8(conn.Stat().Direction),
+					ENR:          enrURL,
+				})
+
 				s.peers.SetConnectionState(conn.RemotePeer(), peers.PeerDisconnected)
 				// Only log disconnections if we were fully connected.
 				if priorState == peers.PeerConnected {

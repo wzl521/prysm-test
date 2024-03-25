@@ -11,22 +11,21 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/prysmaticlabs/go-bitfield"
-	mock "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	coreTime "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/time"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	p2ptest "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	mockSync "github.com/prysmaticlabs/prysm/v5/beacon-chain/sync/initial-sync/testing"
-	lruwrpr "github.com/prysmaticlabs/prysm/v5/cache/lru"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	coreTime "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/time"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	p2ptest "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
+	mockSync "github.com/prysmaticlabs/prysm/v3/beacon-chain/sync/initial-sync/testing"
+	lruwrpr "github.com/prysmaticlabs/prysm/v3/cache/lru"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func setupValidProposerSlashing(t *testing.T) (*ethpb.ProposerSlashing, state.BeaconState) {
@@ -45,8 +44,8 @@ func setupValidProposerSlashing(t *testing.T) (*ethpb.ProposerSlashing, state.Be
 		validatorBalances[i] = params.BeaconConfig().MaxEffectiveBalance
 	}
 
-	currentSlot := primitives.Slot(0)
-	st, err := state_native.InitializeFromProtoPhase0(&ethpb.BeaconState{
+	currentSlot := types.Slot(0)
+	st, err := v1.InitializeFromProto(&ethpb.BeaconState{
 		Validators: validators,
 		Slot:       currentSlot,
 		Balances:   validatorBalances,
@@ -114,14 +113,11 @@ func TestValidateProposerSlashing_ValidSlashing(t *testing.T) {
 
 	slashing, s := setupValidProposerSlashing(t)
 
-	chain := &mock.ChainService{State: s, Genesis: time.Now()}
 	r := &Service{
 		cfg: &config{
-			p2p:               p,
-			chain:             chain,
-			clock:             startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
-			initialSync:       &mockSync.Sync{IsSyncing: false},
-			operationNotifier: chain.OperationNotifier(),
+			p2p:         p,
+			chain:       &mock.ChainService{State: s, Genesis: time.Now()},
+			initialSync: &mockSync.Sync{IsSyncing: false},
 		},
 		seenProposerSlashingCache: lruwrpr.New(10),
 	}
@@ -145,48 +141,6 @@ func TestValidateProposerSlashing_ValidSlashing(t *testing.T) {
 	valid := res == pubsub.ValidationAccept
 	assert.Equal(t, true, valid, "Failed validation")
 	assert.NotNil(t, m.ValidatorData, "Decoded message was not set on the message validator data")
-}
-
-func TestValidateProposerSlashing_ValidOldSlashing(t *testing.T) {
-	p := p2ptest.NewTestP2P(t)
-	ctx := context.Background()
-
-	slashing, s := setupValidProposerSlashing(t)
-	val, err := s.ValidatorAtIndex(slashing.Header_2.Header.ProposerIndex)
-	require.NoError(t, err)
-	val.Slashed = true
-	assert.NoError(t, s.UpdateValidatorAtIndex(slashing.Header_2.Header.ProposerIndex, val))
-
-	chain := &mock.ChainService{State: s, Genesis: time.Now()}
-	r := &Service{
-		cfg: &config{
-			p2p:               p,
-			chain:             chain,
-			clock:             startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
-			initialSync:       &mockSync.Sync{IsSyncing: false},
-			operationNotifier: chain.OperationNotifier(),
-		},
-		seenProposerSlashingCache: lruwrpr.New(10),
-	}
-
-	buf := new(bytes.Buffer)
-	_, err = p.Encoding().EncodeGossip(buf, slashing)
-	require.NoError(t, err)
-	topic := p2p.GossipTypeMapping[reflect.TypeOf(slashing)]
-	d, err := r.currentForkDigest()
-	assert.NoError(t, err)
-	topic = r.addDigestToTopic(topic, d)
-	m := &pubsub.Message{
-		Message: &pubsubpb.Message{
-			Data:  buf.Bytes(),
-			Topic: &topic,
-		},
-	}
-
-	res, err := r.validateProposerSlashing(ctx, "", m)
-	assert.ErrorContains(t, "proposer is already slashed", err)
-	valid := res == pubsub.ValidationIgnore
-	assert.Equal(t, true, valid, "Failed validation")
 }
 
 func TestValidateProposerSlashing_ContextTimeout(t *testing.T) {

@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/blocks"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/blocks"
+	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/runtime/version"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -34,7 +34,7 @@ func TestEth1DataHasEnoughSupport(t *testing.T) {
 		stateVotes         []*ethpb.Eth1Data
 		data               *ethpb.Eth1Data
 		hasSupport         bool
-		votingPeriodLength primitives.Epoch
+		votingPeriodLength types.Epoch
 	}{
 		{
 			stateVotes: FakeDeposits(uint64(params.BeaconConfig().SlotsPerEpoch.Mul(4))),
@@ -70,7 +70,7 @@ func TestEth1DataHasEnoughSupport(t *testing.T) {
 			c.EpochsPerEth1VotingPeriod = tt.votingPeriodLength
 			params.OverrideBeaconConfig(c)
 
-			s, err := state_native.InitializeFromProtoPhase0(&ethpb.BeaconState{
+			s, err := v1.InitializeFromProto(&ethpb.BeaconState{
 				Eth1DataVotes: tt.stateVotes,
 			})
 			require.NoError(t, err)
@@ -160,7 +160,7 @@ func TestAreEth1DataEqual(t *testing.T) {
 }
 
 func TestProcessEth1Data_SetsCorrectly(t *testing.T) {
-	beaconState, err := state_native.InitializeFromProtoPhase0(&ethpb.BeaconState{
+	beaconState, err := v1.InitializeFromProto(&ethpb.BeaconState{
 		Eth1DataVotes: []*ethpb.Eth1Data{},
 	})
 	require.NoError(t, err)

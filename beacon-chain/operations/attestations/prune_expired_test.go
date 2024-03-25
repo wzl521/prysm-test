@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/async"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
+	"github.com/prysmaticlabs/prysm/v3/async"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
 )
 
 func TestPruneExpired_Ticker(t *testing.T) {
@@ -42,9 +42,7 @@ func TestPruneExpired_Ticker(t *testing.T) {
 	}
 	require.NoError(t, s.cfg.Pool.SaveAggregatedAttestations(atts))
 	assert.Equal(t, 2, s.cfg.Pool.AggregatedAttestationCount())
-	for _, att := range atts {
-		require.NoError(t, s.cfg.Pool.SaveBlockAttestation(att))
-	}
+	require.NoError(t, s.cfg.Pool.SaveBlockAttestations(atts))
 
 	// Rewind back one epoch worth of time.
 	s.genesisTime = uint64(prysmTime.Now().Unix()) - uint64(params.BeaconConfig().SlotsPerEpoch.Mul(params.BeaconConfig().SecondsPerSlot))
@@ -97,9 +95,7 @@ func TestPruneExpired_PruneExpiredAtts(t *testing.T) {
 	att4 := &ethpb.Attestation{Data: ad2, AggregationBits: bitfield.Bitlist{0b1110}}
 	atts := []*ethpb.Attestation{att1, att2, att3, att4}
 	require.NoError(t, s.cfg.Pool.SaveAggregatedAttestations(atts))
-	for _, att := range atts {
-		require.NoError(t, s.cfg.Pool.SaveBlockAttestation(att))
-	}
+	require.NoError(t, s.cfg.Pool.SaveBlockAttestations(atts))
 
 	// Rewind back one epoch worth of time.
 	s.genesisTime = uint64(prysmTime.Now().Unix()) - uint64(params.BeaconConfig().SlotsPerEpoch.Mul(params.BeaconConfig().SecondsPerSlot))

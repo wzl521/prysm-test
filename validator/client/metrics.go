@@ -6,12 +6,12 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	"github.com/sirupsen/logrus"
 )
 
@@ -190,28 +190,6 @@ var (
 			"pubkey",
 		},
 	)
-	// ValidatorInSyncCommitteeGaugeVec used to track whether validator is in the current sync committee.
-	ValidatorInSyncCommitteeGaugeVec = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "validator",
-			Name:      "in_sync_committee",
-			Help:      "validator sync committee.New in Altair hardfork",
-		},
-		[]string{
-			"pubkey",
-		},
-	)
-	// ValidatorInNextSyncCommitteeGaugeVec used to track whether validator is in the next sync committee.
-	ValidatorInNextSyncCommitteeGaugeVec = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "validator",
-			Name:      "in_next_sync_committee",
-			Help:      "validator next sync committee. New in Altair hardfork",
-		},
-		[]string{
-			"pubkey",
-		},
-	)
 	// ValidatorInactivityScoreGaugeVec used to track validator inactivity scores.
 	ValidatorInactivityScoreGaugeVec = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -229,7 +207,7 @@ var (
 // responsibilities throughout the beacon chain's lifecycle. It logs absolute accrued rewards
 // and penalties over time, percentage gain/loss, and gives the end user a better idea
 // of how the validator performs with respect to the rest.
-func (v *validator) LogValidatorGainsAndLosses(ctx context.Context, slot primitives.Slot) error {
+func (v *validator) LogValidatorGainsAndLosses(ctx context.Context, slot types.Slot) error {
 	if !slots.IsEpochEnd(slot) || slot <= params.BeaconConfig().SlotsPerEpoch {
 		// Do nothing unless we are at the end of the epoch, and not in the first epoch.
 		return nil
@@ -255,17 +233,15 @@ func (v *validator) LogValidatorGainsAndLosses(ctx context.Context, slot primiti
 	}
 
 	if v.emitAccountMetrics {
-		// There is no distinction between unknown and pending validators here.
-		// The balance is recorded as 0, as this metric is the effective balance of a participating validator.
 		for _, missingPubKey := range resp.MissingValidators {
 			fmtKey := fmt.Sprintf("%#x", missingPubKey)
 			ValidatorBalancesGaugeVec.WithLabelValues(fmtKey).Set(0)
 		}
 	}
 
-	prevEpoch := primitives.Epoch(0)
+	prevEpoch := types.Epoch(0)
 	if slot >= params.BeaconConfig().SlotsPerEpoch {
-		prevEpoch = primitives.Epoch(slot/params.BeaconConfig().SlotsPerEpoch) - 1
+		prevEpoch = types.Epoch(slot/params.BeaconConfig().SlotsPerEpoch) - 1
 		if uint64(v.voteStats.startEpoch) == ^uint64(0) { // Handles unknown first epoch.
 			v.voteStats.startEpoch = prevEpoch
 		}
@@ -280,7 +256,7 @@ func (v *validator) LogValidatorGainsAndLosses(ctx context.Context, slot primiti
 	return nil
 }
 
-func (v *validator) logForEachValidator(index int, pubKey []byte, resp *ethpb.ValidatorPerformanceResponse, slot primitives.Slot, prevEpoch primitives.Epoch) {
+func (v *validator) logForEachValidator(index int, pubKey []byte, resp *ethpb.ValidatorPerformanceResponse, slot types.Slot, prevEpoch types.Epoch) {
 	truncatedKey := fmt.Sprintf("%#x", bytesutil.Trunc(pubKey))
 	pubKeyBytes := bytesutil.ToBytes48(pubKey)
 	if slot < params.BeaconConfig().SlotsPerEpoch {
@@ -298,7 +274,7 @@ func (v *validator) logForEachValidator(index int, pubKey []byte, resp *ethpb.Va
 	if index < len(resp.BalancesBeforeEpochTransition) {
 		balBeforeEpoch = resp.BalancesBeforeEpochTransition[index]
 	} else {
-		log.WithField("pubkey", truncatedKey).Warn("Missing balance before epoch transition")
+		log.WithField("pubKey", truncatedKey).Warn("Missing balance before epoch transition")
 	}
 	if index < len(resp.BalancesAfterEpochTransition) {
 		balAfterEpoch = resp.BalancesAfterEpochTransition[index]
@@ -306,17 +282,17 @@ func (v *validator) logForEachValidator(index int, pubKey []byte, resp *ethpb.Va
 	if index < len(resp.CorrectlyVotedSource) {
 		correctlyVotedSource = resp.CorrectlyVotedSource[index]
 	} else {
-		log.WithField("pubkey", truncatedKey).Warn("Missing correctly voted source")
+		log.WithField("pubKey", truncatedKey).Warn("Missing correctly voted source")
 	}
 	if index < len(resp.CorrectlyVotedTarget) {
 		correctlyVotedTarget = resp.CorrectlyVotedTarget[index]
 	} else {
-		log.WithField("pubkey", truncatedKey).Warn("Missing correctly voted target")
+		log.WithField("pubKey", truncatedKey).Warn("Missing correctly voted target")
 	}
 	if index < len(resp.CorrectlyVotedHead) {
 		correctlyVotedHead = resp.CorrectlyVotedHead[index]
 	} else {
-		log.WithField("pubkey", truncatedKey).Warn("Missing correctly voted head")
+		log.WithField("pubKey", truncatedKey).Warn("Missing correctly voted head")
 	}
 
 	if _, ok := v.startBalances[pubKeyBytes]; !ok {
@@ -333,7 +309,7 @@ func (v *validator) logForEachValidator(index int, pubKey []byte, resp *ethpb.Va
 		percentSinceStart := (newBalance - startBalance) / startBalance
 
 		previousEpochSummaryFields := logrus.Fields{
-			"pubkey":                  truncatedKey,
+			"pubKey":                  truncatedKey,
 			"epoch":                   prevEpoch,
 			"correctlyVotedSource":    correctlyVotedSource,
 			"correctlyVotedTarget":    correctlyVotedTarget,
@@ -349,7 +325,7 @@ func (v *validator) logForEachValidator(index int, pubKey []byte, resp *ethpb.Va
 			if index < len(resp.InactivityScores) {
 				previousEpochSummaryFields["inactivityScore"] = resp.InactivityScores[index]
 			} else {
-				log.WithField("pubkey", truncatedKey).Warn("Missing inactivity score")
+				log.WithField("pubKey", truncatedKey).Warn("Missing inactivity score")
 			}
 		}
 
@@ -384,9 +360,9 @@ func (v *validator) logForEachValidator(index int, pubKey []byte, resp *ethpb.Va
 }
 
 // UpdateLogAggregateStats updates and logs the voteStats struct of a validator using the RPC response obtained from LogValidatorGainsAndLosses.
-func (v *validator) UpdateLogAggregateStats(resp *ethpb.ValidatorPerformanceResponse, slot primitives.Slot) {
+func (v *validator) UpdateLogAggregateStats(resp *ethpb.ValidatorPerformanceResponse, slot types.Slot) {
 	summary := &v.voteStats
-	currentEpoch := primitives.Epoch(slot / params.BeaconConfig().SlotsPerEpoch)
+	currentEpoch := types.Epoch(slot / params.BeaconConfig().SlotsPerEpoch)
 	var attested, correctSource, correctTarget, correctHead, inactivityScore int
 
 	for i := range resp.PublicKeys {

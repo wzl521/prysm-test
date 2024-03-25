@@ -5,21 +5,20 @@ import (
 	"testing"
 	"time"
 
-	mock "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed"
-	opfeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/operation"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/transition"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/synccommittee"
-	mockp2p "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/rpc/core"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	opfeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/operation"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/transition"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/synccommittee"
+	mockp2p "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/testing"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -65,12 +64,10 @@ func TestGetSyncMessageBlockRoot_Optimistic(t *testing.T) {
 func TestSubmitSyncMessage_OK(t *testing.T) {
 	st, _ := util.DeterministicGenesisStateAltair(t, 10)
 	server := &Server{
-		CoreService: &core.Service{
-			SyncCommitteePool: synccommittee.NewStore(),
-			P2P:               &mockp2p.MockBroadcaster{},
-			HeadFetcher: &mock.ChainService{
-				State: st,
-			},
+		SyncCommitteePool: synccommittee.NewStore(),
+		P2P:               &mockp2p.MockBroadcaster{},
+		HeadFetcher: &mock.ChainService{
+			State: st,
 		},
 	}
 	msg := &ethpb.SyncCommitteeMessage{
@@ -79,46 +76,41 @@ func TestSubmitSyncMessage_OK(t *testing.T) {
 	}
 	_, err := server.SubmitSyncMessage(context.Background(), msg)
 	require.NoError(t, err)
-	savedMsgs, err := server.CoreService.SyncCommitteePool.SyncCommitteeMessages(1)
+	savedMsgs, err := server.SyncCommitteePool.SyncCommitteeMessages(1)
 	require.NoError(t, err)
 	require.DeepEqual(t, []*ethpb.SyncCommitteeMessage{msg}, savedMsgs)
 }
 
 func TestGetSyncSubcommitteeIndex_Ok(t *testing.T) {
+	params.SetupTestConfigCleanup(t)
+	params.OverrideBeaconConfig(params.MainnetConfig())
 	transition.SkipSlotCache.Disable()
 	defer transition.SkipSlotCache.Enable()
 
 	server := &Server{
 		HeadFetcher: &mock.ChainService{
-			SyncCommitteeIndices: []primitives.CommitteeIndex{0},
+			SyncCommitteeIndices: []types.CommitteeIndex{0},
 		},
 	}
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	// Request slot 0, should get the index 0 for validator 0.
 	res, err := server.GetSyncSubcommitteeIndex(context.Background(), &ethpb.SyncSubcommitteeIndexRequest{
-		PublicKey: pubKey[:], Slot: primitives.Slot(0),
+		PublicKey: pubKey[:], Slot: types.Slot(0),
 	})
 	require.NoError(t, err)
-	require.DeepEqual(t, []primitives.CommitteeIndex{0}, res.Indices)
+	require.DeepEqual(t, []types.CommitteeIndex{0}, res.Indices)
 }
 
 func TestGetSyncCommitteeContribution_FiltersDuplicates(t *testing.T) {
 	st, _ := util.DeterministicGenesisStateAltair(t, 10)
-	syncCommitteePool := synccommittee.NewStore()
-	headFetcher := &mock.ChainService{
-		State:                st,
-		SyncCommitteeIndices: []primitives.CommitteeIndex{10},
-	}
 	server := &Server{
-		CoreService: &core.Service{
-			SyncCommitteePool: syncCommitteePool,
-			HeadFetcher:       headFetcher,
-			P2P:               &mockp2p.MockBroadcaster{},
-		},
-		SyncCommitteePool: syncCommitteePool,
-		HeadFetcher:       headFetcher,
+		SyncCommitteePool: synccommittee.NewStore(),
 		P2P:               &mockp2p.MockBroadcaster{},
-		TimeFetcher:       &mock.ChainService{Genesis: time.Now()},
+		HeadFetcher: &mock.ChainService{
+			State:                st,
+			SyncCommitteeIndices: []types.CommitteeIndex{10},
+		},
+		TimeFetcher: &mock.ChainService{Genesis: time.Now()},
 	}
 	secKey, err := bls.RandKey()
 	require.NoError(t, err)
@@ -147,11 +139,9 @@ func TestGetSyncCommitteeContribution_FiltersDuplicates(t *testing.T) {
 
 func TestSubmitSignedContributionAndProof_OK(t *testing.T) {
 	server := &Server{
-		CoreService: &core.Service{
-			SyncCommitteePool: synccommittee.NewStore(),
-			Broadcaster:       &mockp2p.MockBroadcaster{},
-			OperationNotifier: (&mock.ChainService{}).OperationNotifier(),
-		},
+		SyncCommitteePool: synccommittee.NewStore(),
+		P2P:               &mockp2p.MockBroadcaster{},
+		OperationNotifier: (&mock.ChainService{}).OperationNotifier(),
 	}
 	contribution := &ethpb.SignedContributionAndProof{
 		Message: &ethpb.ContributionAndProof{
@@ -163,23 +153,21 @@ func TestSubmitSignedContributionAndProof_OK(t *testing.T) {
 	}
 	_, err := server.SubmitSignedContributionAndProof(context.Background(), contribution)
 	require.NoError(t, err)
-	savedMsgs, err := server.CoreService.SyncCommitteePool.SyncCommitteeContributions(1)
+	savedMsgs, err := server.SyncCommitteePool.SyncCommitteeContributions(1)
 	require.NoError(t, err)
 	require.DeepEqual(t, []*ethpb.SyncCommitteeContribution{contribution.Message.Contribution}, savedMsgs)
 }
 
 func TestSubmitSignedContributionAndProof_Notification(t *testing.T) {
 	server := &Server{
-		CoreService: &core.Service{
-			SyncCommitteePool: synccommittee.NewStore(),
-			Broadcaster:       &mockp2p.MockBroadcaster{},
-			OperationNotifier: (&mock.ChainService{}).OperationNotifier(),
-		},
+		SyncCommitteePool: synccommittee.NewStore(),
+		P2P:               &mockp2p.MockBroadcaster{},
+		OperationNotifier: (&mock.ChainService{}).OperationNotifier(),
 	}
 
 	// Subscribe to operation notifications.
 	opChannel := make(chan *feed.Event, 1024)
-	opSub := server.CoreService.OperationNotifier.OperationFeed().Subscribe(opChannel)
+	opSub := server.OperationNotifier.OperationFeed().Subscribe(opChannel)
 	defer opSub.Unsubscribe()
 
 	contribution := &ethpb.SignedContributionAndProof{

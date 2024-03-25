@@ -1,6 +1,15 @@
 # Prysmatic Labs Remote Build Execution Image with Cross Compile Support.
 #
-# See README.md for update instructions.
+# Update instructions.
+# - Build the docker image.
+# - Push to gcr.io.
+# - Update _PRYSM_BUILD_IMAGE_DIGEST in //tools/cross-toolchain/rbe_toolchains_config.bzl
+# - Run ./tools/cross-toolchain/regenerate.sh
+# - Add and commit the newly generated configs.
+# - Done!
+#
+# docker build -t gcr.io/prysmaticlabs/rbe-worker:latest .
+# gcloud docker -- push gcr.io/prysmaticlabs/rbe-worker:latest 
 
 FROM debian:bullseye-slim as build
 
@@ -13,7 +22,7 @@ RUN apt-get update && \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
         cmake libssl-dev libxml2-dev vim apt-transport-https \
         zip unzip libtinfo5 patch zlib1g-dev autoconf libtool \
-        pkg-config make docker.io gnupg2 libgmp-dev python3 openjdk-17-jdk-headless
+        pkg-config make docker.io gnupg2 libgmp-dev python
 
 # install llvm/clang cross-build toolchains
 ENV INSTALL_LLVM_VERSION=12.0.0
@@ -29,7 +38,6 @@ RUN /tmp/link_osxcross.sh
 
 # containerized development environment
 FROM build as devel
-
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64/
-
+RUN mkdir /workdir
+WORKDIR /workdir
 RUN echo 'PS1="\[$(tput setaf 3)$(tput bold)[\]devel@\\h:\\W]#\[$(tput sgr0) \]"' >> /root/.bashrc

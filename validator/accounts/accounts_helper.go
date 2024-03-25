@@ -10,13 +10,13 @@ import (
 	"github.com/logrusorgru/aurora"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/cmd/validator/flags"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/io/prompt"
-	"github.com/prysmaticlabs/prysm/v5/validator/accounts/petnames"
-	"github.com/prysmaticlabs/prysm/v5/validator/accounts/userprompt"
+	"github.com/prysmaticlabs/prysm/v3/cmd/validator/flags"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/io/prompt"
+	"github.com/prysmaticlabs/prysm/v3/validator/accounts/petnames"
+	"github.com/prysmaticlabs/prysm/v3/validator/accounts/userprompt"
 	"github.com/urfave/cli/v2"
 )
 
@@ -42,14 +42,10 @@ func selectAccounts(selectionPrompt string, pubKeys [][fieldparams.BLSPubkeyLeng
 	exit := "Done selecting"
 	results := make([]int, 0)
 	au := aurora.NewAurora(true)
-	if len(pubKeyStrings) > 5 {
-		log.Warnf("there are more than %d potential public keys to exit, please consider using the --%s or --%s flags", 5, flags.VoluntaryExitPublicKeysFlag.Name, flags.ExitAllFlag.Name)
-	}
 	for result != exit {
 		p := promptui.Select{
 			Label:        selectionPrompt,
 			HideSelected: true,
-			Size:         len(pubKeyStrings),
 			Items:        append([]string{exit, allAccountsText}, pubKeyStrings...),
 			Templates:    templates,
 		}
@@ -145,7 +141,6 @@ func FilterExitAccountsFromUserInput(
 	cliCtx *cli.Context,
 	r io.Reader,
 	validatingPublicKeys [][fieldparams.BLSPubkeyLength]byte,
-	forceExit bool,
 ) (rawPubKeys [][]byte, formattedPubKeys []string, err error) {
 	if !cliCtx.IsSet(flags.ExitAllFlag.Name) {
 		// Allow the user to interactively select the accounts to exit or optionally
@@ -202,20 +197,23 @@ func FilterExitAccountsFromUserInput(
 		fmt.Printf("About to perform a voluntary exit of %d accounts\n", len(rawPubKeys))
 	}
 
-	if forceExit {
-		return rawPubKeys, formattedPubKeys, nil
-	}
-
-	promptHeader := au.Red("===============CONFIRMATION NEEDED===============")
-	promptQuestion := "continue with the voluntary exit? (y/n)"
-	promptText := fmt.Sprintf("%s\n%s", promptHeader, promptQuestion)
-	resp, err := prompt.ValidatePrompt(r, promptText, prompt.ValidateYesOrNo)
+	promptHeader := au.Red("===============IMPORTANT===============")
+	promptDescription := "Withdrawing funds is not possible in Phase 0 of the system. " +
+		"Please navigate to the following website and make sure you understand the current implications " +
+		"of a voluntary exit before making the final decision:"
+	promptURL := au.Blue("https://docs.prylabs.network/docs/wallet/exiting-a-validator/#withdrawal-delay-warning")
+	promptQuestion := "If you still want to continue with the voluntary exit, please input a phrase found at the end " +
+		"of the page from the above URL"
+	promptText := fmt.Sprintf("%s\n%s\n%s\n%s", promptHeader, promptDescription, promptURL, promptQuestion)
+	resp, err := prompt.ValidatePrompt(r, promptText, func(input string) error {
+		return prompt.ValidatePhrase(input, ExitPassphrase)
+	})
 	if err != nil {
 		return nil, nil, err
 	}
 	if strings.EqualFold(resp, "n") {
-		log.Info("Voluntary exit aborted")
 		return nil, nil, nil
 	}
+
 	return rawPubKeys, formattedPubKeys, nil
 }

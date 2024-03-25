@@ -1,4 +1,4 @@
-package primitives
+package types
 
 import (
 	fssz "github.com/prysmaticlabs/fastssz"

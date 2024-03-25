@@ -38,25 +38,9 @@ var (
 		Name: "remote_web3signer_block_bellatrix_sign_requests_total",
 		Help: "Total number of block bellatrix sign requests",
 	})
-	blindedBlockBellatrixSignRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
+	blindedblockBellatrixSignRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "remote_web3signer_blinded_block_bellatrix_sign_requests_total",
 		Help: "Total number of blinded block bellatrix sign requests",
-	})
-	blockCapellaSignRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "remote_web3signer_block_capella_sign_requests_total",
-		Help: "Total number of block capella sign requests",
-	})
-	blindedBlockCapellaSignRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "remote_web3signer_blinded_block_capella_sign_requests_total",
-		Help: "Total number of block capella sign requests",
-	})
-	blockDenebSignRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "remote_web3signer_block_deneb_sign_requests_total",
-		Help: "Total number of block deneb sign requests",
-	})
-	blindedBlockDenebSignRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "remote_web3signer_blinded_block_deneb_sign_requests_total",
-		Help: "Total number of blinded block deneb sign requests",
 	})
 	randaoRevealSignRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "remote_web3signer_randao_reveal_sign_requests_total",

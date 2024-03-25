@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/validator/accounts/wallet"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager/derived"
+	"github.com/prysmaticlabs/prysm/v3/validator/accounts/wallet"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager/derived"
 )
 
 const (
@@ -20,7 +20,7 @@ var (
 )
 
 // WalletRecover uses a menmonic seed phrase to recover a wallet into the path provided.
-func (acm *CLIManager) WalletRecover(ctx context.Context) (*wallet.Wallet, error) {
+func (acm *AccountsCLIManager) WalletRecover(ctx context.Context) (*wallet.Wallet, error) {
 	// Ensure that the wallet directory does not contain a wallet already
 	dirExists, err := wallet.Exists(acm.walletDir)
 	if err != nil {
@@ -45,7 +45,7 @@ func (acm *CLIManager) WalletRecover(ctx context.Context) (*wallet.Wallet, error
 	if err != nil {
 		return nil, errors.Wrap(err, "could not make keymanager for given phrase")
 	}
-	if err := km.RecoverAccountsFromMnemonic(ctx, acm.mnemonic, acm.mnemonicLanguage, acm.mnemonic25thWord, acm.numAccounts); err != nil {
+	if err := km.RecoverAccountsFromMnemonic(ctx, acm.mnemonic, acm.mnemonic25thWord, acm.numAccounts); err != nil {
 		return nil, err
 	}
 	log.WithField("wallet-path", w.AccountsDir()).Infof(

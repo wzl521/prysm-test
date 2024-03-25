@@ -3,8 +3,8 @@ package mock
 import (
 	"context"
 
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 )
 
 // PoolMock --
@@ -18,7 +18,7 @@ func (*PoolMock) AggregateUnaggregatedAttestations(_ context.Context) error {
 }
 
 // AggregateUnaggregatedAttestationsBySlotIndex --
-func (*PoolMock) AggregateUnaggregatedAttestationsBySlotIndex(_ context.Context, _ primitives.Slot, _ primitives.CommitteeIndex) error {
+func (*PoolMock) AggregateUnaggregatedAttestationsBySlotIndex(_ context.Context, _ types.Slot, _ types.CommitteeIndex) error {
 	panic("implement me")
 }
 
@@ -39,7 +39,7 @@ func (m *PoolMock) AggregatedAttestations() []*ethpb.Attestation {
 }
 
 // AggregatedAttestationsBySlotIndex --
-func (*PoolMock) AggregatedAttestationsBySlotIndex(_ context.Context, _ primitives.Slot, _ primitives.CommitteeIndex) []*ethpb.Attestation {
+func (*PoolMock) AggregatedAttestationsBySlotIndex(_ context.Context, _ types.Slot, _ types.CommitteeIndex) []*ethpb.Attestation {
 	panic("implement me")
 }
 
@@ -74,7 +74,7 @@ func (*PoolMock) UnaggregatedAttestations() ([]*ethpb.Attestation, error) {
 }
 
 // UnaggregatedAttestationsBySlotIndex --
-func (*PoolMock) UnaggregatedAttestationsBySlotIndex(_ context.Context, _ primitives.Slot, _ primitives.CommitteeIndex) []*ethpb.Attestation {
+func (*PoolMock) UnaggregatedAttestationsBySlotIndex(_ context.Context, _ types.Slot, _ types.CommitteeIndex) []*ethpb.Attestation {
 	panic("implement me")
 }
 

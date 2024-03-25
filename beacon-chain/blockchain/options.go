@@ -1,22 +1,20 @@
 package blockchain
 
 import (
-	"github.com/prysmaticlabs/prysm/v5/async/event"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache"
-	statefeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/state"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db/filesystem"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/execution"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/forkchoice"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/attestations"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/blstoexec"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/slashings"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/voluntaryexits"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stategen"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/async/event"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache/depositcache"
+	statefeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/state"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/execution"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/forkchoice"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/attestations"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/slashings"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/voluntaryexits"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stategen"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 )
 
 type Option func(s *Service) error
@@ -62,25 +60,17 @@ func WithExecutionEngineCaller(c execution.EngineCaller) Option {
 }
 
 // WithDepositCache for deposit lifecycle after chain inclusion.
-func WithDepositCache(c cache.DepositCache) Option {
+func WithDepositCache(c *depositcache.DepositCache) Option {
 	return func(s *Service) error {
 		s.cfg.DepositCache = c
 		return nil
 	}
 }
 
-// WithPayloadIDCache for payload ID cache.
-func WithPayloadIDCache(c *cache.PayloadIDCache) Option {
+// WithProposerIdsCache for proposer id cache.
+func WithProposerIdsCache(c *cache.ProposerPayloadIDsCache) Option {
 	return func(s *Service) error {
-		s.cfg.PayloadIDCache = c
-		return nil
-	}
-}
-
-// WithTrackedValidatorsCache for tracked validators cache.
-func WithTrackedValidatorsCache(c *cache.TrackedValidatorsCache) Option {
-	return func(s *Service) error {
-		s.cfg.TrackedValidatorsCache = c
+		s.cfg.ProposerSlotIndexCache = c
 		return nil
 	}
 }
@@ -105,14 +95,6 @@ func WithExitPool(p voluntaryexits.PoolManager) Option {
 func WithSlashingPool(p slashings.PoolManager) Option {
 	return func(s *Service) error {
 		s.cfg.SlashingPool = p
-		return nil
-	}
-}
-
-// WithBLSToExecPool to keep track of BLS to Execution address changes.
-func WithBLSToExecPool(p blstoexec.PoolManager) Option {
-	return func(s *Service) error {
-		s.cfg.BLSToExecPool = p
 		return nil
 	}
 }
@@ -165,43 +147,17 @@ func WithSlasherAttestationsFeed(f *event.Feed) Option {
 	}
 }
 
+func withStateBalanceCache(c *stateBalanceCache) Option {
+	return func(s *Service) error {
+		s.justifiedBalances = c
+		return nil
+	}
+}
+
 // WithFinalizedStateAtStartUp to store finalized state at start up.
 func WithFinalizedStateAtStartUp(st state.BeaconState) Option {
 	return func(s *Service) error {
 		s.cfg.FinalizedStateAtStartUp = st
-		return nil
-	}
-}
-
-// WithClockSynchronizer sets the ClockSetter/ClockWaiter values to be used by services that need to block until
-// the genesis timestamp is known (ClockWaiter) or which determine the genesis timestamp (ClockSetter).
-func WithClockSynchronizer(gs *startup.ClockSynchronizer) Option {
-	return func(s *Service) error {
-		s.clockSetter = gs
-		s.clockWaiter = gs
-		return nil
-	}
-}
-
-// WithSyncComplete sets a channel that is used to notify blockchain service that the node has synced to head.
-func WithSyncComplete(c chan struct{}) Option {
-	return func(s *Service) error {
-		s.syncComplete = c
-		return nil
-	}
-}
-
-// WithBlobStorage sets the blob storage backend for the blockchain service.
-func WithBlobStorage(b *filesystem.BlobStorage) Option {
-	return func(s *Service) error {
-		s.blobStorage = b
-		return nil
-	}
-}
-
-func WithSyncChecker(checker Checker) Option {
-	return func(s *Service) error {
-		s.cfg.SyncChecker = checker
 		return nil
 	}
 }

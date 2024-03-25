@@ -2,69 +2,69 @@ package helpers
 
 import (
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/validator"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/eth/v1"
 )
 
 // ValidatorStatus returns a validator's status at the given epoch.
-func ValidatorStatus(val state.ReadOnlyValidator, epoch primitives.Epoch) (validator.Status, error) {
-	valStatus, err := ValidatorSubStatus(val, epoch)
+func ValidatorStatus(validator state.ReadOnlyValidator, epoch types.Epoch) (ethpb.ValidatorStatus, error) {
+	valStatus, err := ValidatorSubStatus(validator, epoch)
 	if err != nil {
-		return 0, errors.Wrap(err, "could not get validator sub status")
+		return 0, errors.Wrap(err, "could not get sub status")
 	}
 	switch valStatus {
-	case validator.PendingInitialized, validator.PendingQueued:
-		return validator.Pending, nil
-	case validator.ActiveOngoing, validator.ActiveSlashed, validator.ActiveExiting:
-		return validator.Active, nil
-	case validator.ExitedUnslashed, validator.ExitedSlashed:
-		return validator.Exited, nil
-	case validator.WithdrawalPossible, validator.WithdrawalDone:
-		return validator.Withdrawal, nil
+	case ethpb.ValidatorStatus_PENDING_INITIALIZED, ethpb.ValidatorStatus_PENDING_QUEUED:
+		return ethpb.ValidatorStatus_PENDING, nil
+	case ethpb.ValidatorStatus_ACTIVE_ONGOING, ethpb.ValidatorStatus_ACTIVE_SLASHED, ethpb.ValidatorStatus_ACTIVE_EXITING:
+		return ethpb.ValidatorStatus_ACTIVE, nil
+	case ethpb.ValidatorStatus_EXITED_UNSLASHED, ethpb.ValidatorStatus_EXITED_SLASHED:
+		return ethpb.ValidatorStatus_EXITED, nil
+	case ethpb.ValidatorStatus_WITHDRAWAL_POSSIBLE, ethpb.ValidatorStatus_WITHDRAWAL_DONE:
+		return ethpb.ValidatorStatus_WITHDRAWAL, nil
 	}
 	return 0, errors.New("invalid validator state")
 }
 
 // ValidatorSubStatus returns a validator's sub-status at the given epoch.
-func ValidatorSubStatus(val state.ReadOnlyValidator, epoch primitives.Epoch) (validator.Status, error) {
+func ValidatorSubStatus(validator state.ReadOnlyValidator, epoch types.Epoch) (ethpb.ValidatorStatus, error) {
 	farFutureEpoch := params.BeaconConfig().FarFutureEpoch
 
 	// Pending.
-	if val.ActivationEpoch() > epoch {
-		if val.ActivationEligibilityEpoch() == farFutureEpoch {
-			return validator.PendingInitialized, nil
-		} else if val.ActivationEligibilityEpoch() < farFutureEpoch {
-			return validator.PendingQueued, nil
+	if validator.ActivationEpoch() > epoch {
+		if validator.ActivationEligibilityEpoch() == farFutureEpoch {
+			return ethpb.ValidatorStatus_PENDING_INITIALIZED, nil
+		} else if validator.ActivationEligibilityEpoch() < farFutureEpoch {
+			return ethpb.ValidatorStatus_PENDING_QUEUED, nil
 		}
 	}
 
 	// Active.
-	if val.ActivationEpoch() <= epoch && epoch < val.ExitEpoch() {
-		if val.ExitEpoch() == farFutureEpoch {
-			return validator.ActiveOngoing, nil
-		} else if val.ExitEpoch() < farFutureEpoch {
-			if val.Slashed() {
-				return validator.ActiveSlashed, nil
+	if validator.ActivationEpoch() <= epoch && epoch < validator.ExitEpoch() {
+		if validator.ExitEpoch() == farFutureEpoch {
+			return ethpb.ValidatorStatus_ACTIVE_ONGOING, nil
+		} else if validator.ExitEpoch() < farFutureEpoch {
+			if validator.Slashed() {
+				return ethpb.ValidatorStatus_ACTIVE_SLASHED, nil
 			}
-			return validator.ActiveExiting, nil
+			return ethpb.ValidatorStatus_ACTIVE_EXITING, nil
 		}
 	}
 
 	// Exited.
-	if val.ExitEpoch() <= epoch && epoch < val.WithdrawableEpoch() {
-		if val.Slashed() {
-			return validator.ExitedSlashed, nil
+	if validator.ExitEpoch() <= epoch && epoch < validator.WithdrawableEpoch() {
+		if validator.Slashed() {
+			return ethpb.ValidatorStatus_EXITED_SLASHED, nil
 		}
-		return validator.ExitedUnslashed, nil
+		return ethpb.ValidatorStatus_EXITED_UNSLASHED, nil
 	}
 
-	if val.WithdrawableEpoch() <= epoch {
-		if val.EffectiveBalance() != 0 {
-			return validator.WithdrawalPossible, nil
+	if validator.WithdrawableEpoch() <= epoch {
+		if validator.EffectiveBalance() != 0 {
+			return ethpb.ValidatorStatus_WITHDRAWAL_POSSIBLE, nil
 		} else {
-			return validator.WithdrawalDone, nil
+			return ethpb.ValidatorStatus_WITHDRAWAL_DONE, nil
 		}
 	}
 

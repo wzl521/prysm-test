@@ -9,8 +9,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/tools/unencrypted-keys-gen/keygen"
+	"github.com/prysmaticlabs/prysm/v3/tools/unencrypted-keys-gen/keygen"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 )
@@ -53,7 +52,7 @@ func main() {
 		})
 	}
 
-	outFile, err := os.OpenFile(os.Args[2], os.O_CREATE|os.O_EXCL, params.BeaconIoConfig().ReadWritePermissions)
+	outFile, err := os.Create(os.Args[2])
 	if err != nil {
 		log.WithError(err).Fatalf("Failed to create file at %s", os.Args[2])
 	}

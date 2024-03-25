@@ -9,15 +9,15 @@ import (
 	"reflect"
 	"testing"
 
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/validator/db/kv"
-	dbtest "github.com/prysmaticlabs/prysm/v5/validator/db/testing"
-	"github.com/prysmaticlabs/prysm/v5/validator/slashing-protection-history/format"
-	valtest "github.com/prysmaticlabs/prysm/v5/validator/testing"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/validator/db/kv"
+	dbtest "github.com/prysmaticlabs/prysm/v3/validator/db/testing"
+	"github.com/prysmaticlabs/prysm/v3/validator/slashing-protection-history/format"
+	valtest "github.com/prysmaticlabs/prysm/v3/validator/testing"
 	logTest "github.com/sirupsen/logrus/hooks/test"
 )
 
@@ -87,7 +87,7 @@ func TestStore_ImportInterchangeData_BadFormat_PreventsDBWrites(t *testing.T) {
 					},
 				},
 			}
-			slashingKind, err := validatorDB.CheckSlashableAttestation(ctx, publicKeys[i], []byte{}, indexedAtt)
+			slashingKind, err := validatorDB.CheckSlashableAttestation(ctx, publicKeys[i], [32]byte{}, indexedAtt)
 			// We expect we do not have an attesting history for each attestation
 			require.NoError(t, err)
 			require.Equal(t, kv.NotSlashable, slashingKind)
@@ -139,7 +139,7 @@ func TestStore_ImportInterchangeData_OK(t *testing.T) {
 					},
 				},
 			}
-			slashingKind, err := validatorDB.CheckSlashableAttestation(ctx, publicKeys[i], []byte{}, indexedAtt)
+			slashingKind, err := validatorDB.CheckSlashableAttestation(ctx, publicKeys[i], [32]byte{}, indexedAtt)
 			// We expect we have an attesting history for the attestation and when
 			// attempting to verify the same att is slashable with a different signing root,
 			// we expect to receive a double vote slashing kind.
@@ -151,7 +151,7 @@ func TestStore_ImportInterchangeData_OK(t *testing.T) {
 
 		receivedProposalHistory, err := validatorDB.ProposalHistoryForPubKey(ctx, publicKeys[i])
 		require.NoError(t, err)
-		rootsBySlot := make(map[primitives.Slot][]byte)
+		rootsBySlot := make(map[types.Slot][]byte)
 		for _, proposal := range receivedProposalHistory {
 			rootsBySlot[proposal.Slot] = proposal.SigningRoot
 		}
@@ -1051,11 +1051,8 @@ func Test_filterSlashablePubKeysFromAttestations(t *testing.T) {
 				attestingHistory, err := transformSignedAttestations(pubKey, signedAtts)
 				require.NoError(t, err)
 				for _, att := range attestingHistory {
-					var signingRoot [32]byte
-					copy(signingRoot[:], att.SigningRoot)
-
 					indexedAtt := createAttestation(att.Source, att.Target)
-					err := validatorDB.SaveAttestationForPubKey(ctx, pubKey, signingRoot, indexedAtt)
+					err := validatorDB.SaveAttestationForPubKey(ctx, pubKey, att.SigningRoot, indexedAtt)
 					require.NoError(t, err)
 				}
 			}

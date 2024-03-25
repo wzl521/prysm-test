@@ -7,8 +7,6 @@ package endtoend
 import (
 	"context"
 	"fmt"
-	"math"
-	"math/big"
 	"os"
 	"path"
 	"strings"
@@ -16,27 +14,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prysmaticlabs/prysm/v5/api/client/beacon"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/io/file"
-	"github.com/prysmaticlabs/prysm/v5/network/forks"
-	enginev1 "github.com/prysmaticlabs/prysm/v5/proto/engine/v1"
+	"github.com/prysmaticlabs/prysm/v3/api/client/beacon"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/io/file"
+	enginev1 "github.com/prysmaticlabs/prysm/v3/proto/engine/v1"
+	"github.com/prysmaticlabs/prysm/v3/proto/eth/service"
+	v1 "github.com/prysmaticlabs/prysm/v3/proto/eth/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/transition"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/components"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/components/eth1"
-	ev "github.com/prysmaticlabs/prysm/v5/testing/endtoend/evaluators"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/helpers"
-	e2e "github.com/prysmaticlabs/prysm/v5/testing/endtoend/params"
-	e2etypes "github.com/prysmaticlabs/prysm/v5/testing/endtoend/types"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/transition"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	eth "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/components"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/components/eth1"
+	ev "github.com/prysmaticlabs/prysm/v3/testing/endtoend/evaluators"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/helpers"
+	e2e "github.com/prysmaticlabs/prysm/v3/testing/endtoend/params"
+	e2etypes "github.com/prysmaticlabs/prysm/v3/testing/endtoend/types"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -61,7 +60,6 @@ type testRunner struct {
 	t          *testing.T
 	config     *e2etypes.E2EConfig
 	comHandler *componentHandler
-	depositor  *eth1.Depositor
 }
 
 // newTestRunner creates E2E test runner.
@@ -72,41 +70,13 @@ func newTestRunner(t *testing.T, config *e2etypes.E2EConfig) *testRunner {
 	}
 }
 
-type runEvent func() error
-
-func (r *testRunner) runBase(runEvents []runEvent) {
+// run executes configured E2E test.
+func (r *testRunner) run() {
 	r.comHandler = NewComponentHandler(r.config, r.t)
-	r.comHandler.group.Go(func() error {
-		miner, ok := r.comHandler.eth1Miner.(*eth1.Miner)
-		if !ok {
-			return errors.New("in runBase, comHandler.eth1Miner fails type assertion to *eth1.Miner")
-		}
-		if err := helpers.ComponentsStarted(r.comHandler.ctx, []e2etypes.ComponentRunner{miner}); err != nil {
-			return errors.Wrap(err, "eth1Miner component never started - cannot send deposits")
-		}
-		keyPath, err := e2e.TestParams.Paths.MinerKeyPath()
-		if err != nil {
-			return errors.Wrap(err, "error getting miner key file from bazel static files")
-		}
-		key, err := helpers.KeyFromPath(keyPath, miner.Password())
-		if err != nil {
-			return errors.Wrap(err, "failed to read key from miner wallet")
-		}
-		client, err := helpers.MinerRPCClient()
-		if err != nil {
-			return errors.Wrap(err, "failed to initialize a client to connect to the miner EL node")
-		}
-		r.depositor = &eth1.Depositor{Key: key, Client: client, NetworkId: big.NewInt(eth1.NetworkId)}
-		if err := r.depositor.Start(r.comHandler.ctx); err != nil {
-			return errors.Wrap(err, "depositor.Start failed")
-		}
-		return nil
-	})
 	r.comHandler.setup()
 
-	for _, re := range runEvents {
-		r.addEvent(re)
-	}
+	// Run E2E evaluators and tests.
+	r.addEvent(r.defaultEndToEndRun)
 
 	if err := r.comHandler.group.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		// At the end of the main evaluator goroutine all nodes are killed, no need to fail the test.
@@ -117,17 +87,23 @@ func (r *testRunner) runBase(runEvents []runEvent) {
 	}
 }
 
-// run is the stock test runner
-func (r *testRunner) run() {
-	r.runBase([]runEvent{r.defaultEndToEndRun})
-}
-
-// scenarioRunner runs more complex scenarios to exercise error handling for unhappy paths
 func (r *testRunner) scenarioRunner() {
-	r.runBase([]runEvent{r.scenarioRun})
+	r.comHandler = NewComponentHandler(r.config, r.t)
+	r.comHandler.setup()
+
+	// Run E2E evaluators and tests.
+	r.addEvent(r.scenarioRun)
+
+	if err := r.comHandler.group.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		// At the end of the main evaluator goroutine all nodes are killed, no need to fail the test.
+		if strings.Contains(err.Error(), "signal: killed") {
+			return
+		}
+		r.t.Fatalf("E2E test ended in error: %v", err)
+	}
 }
 
-func (r *testRunner) waitExtra(ctx context.Context, e primitives.Epoch, conn *grpc.ClientConn, extra primitives.Epoch) error {
+func (r *testRunner) waitExtra(ctx context.Context, e types.Epoch, conn *grpc.ClientConn, extra types.Epoch) error {
 	spe := uint64(params.BeaconConfig().SlotsPerEpoch.Mul(params.BeaconConfig().SecondsPerSlot))
 	dl := time.Now().Add(time.Second * time.Duration(uint64(extra)*spe))
 
@@ -169,15 +145,15 @@ func (r *testRunner) waitForChainStart() {
 }
 
 // runEvaluators executes assigned evaluators.
-func (r *testRunner) runEvaluators(ec *e2etypes.EvaluationContext, conns []*grpc.ClientConn, tickingStartTime time.Time) error {
+func (r *testRunner) runEvaluators(conns []*grpc.ClientConn, tickingStartTime time.Time) error {
 	t, config := r.t, r.config
 	secondsPerEpoch := uint64(params.BeaconConfig().SlotsPerEpoch.Mul(params.BeaconConfig().SecondsPerSlot))
 	ticker := helpers.NewEpochTicker(tickingStartTime, secondsPerEpoch)
 	for currentEpoch := range ticker.C() {
-		if config.EvalInterceptor(ec, currentEpoch, conns) {
+		if config.EvalInterceptor(currentEpoch, conns) {
 			continue
 		}
-		r.executeProvidedEvaluators(ec, currentEpoch, conns, config.Evaluators)
+		r.executeProvidedEvaluators(currentEpoch, conns, config.Evaluators)
 
 		if t.Failed() || currentEpoch >= config.EpochsToRun-1 {
 			ticker.Done()
@@ -201,18 +177,12 @@ func (r *testRunner) testDepositsAndTx(ctx context.Context, g *errgroup.Group,
 		if err := helpers.ComponentsStarted(ctx, requiredNodes); err != nil {
 			return fmt.Errorf("deposit check validator node requires beacon nodes to run: %w", err)
 		}
-		if err := helpers.ComponentsStarted(ctx, []e2etypes.ComponentRunner{r.depositor}); err != nil {
-			return errors.Wrap(err, "testDepositsAndTx unable to run, depositor did not Start")
-		}
 		go func() {
 			if r.config.TestDeposits {
 				log.Info("Running deposit tests")
-				// The validators with an index < minGenesisActiveCount all have deposits already from the chain start.
-				// Skip all of those chain start validators by seeking to minGenesisActiveCount in the validator list
-				// for further deposit testing.
-				err := r.depositor.SendAndMine(ctx, minGenesisActiveCount, int(e2e.DepositCount), e2etypes.PostGenesisDepositBatch, false)
+				err := components.SendAndMineDeposits(keystorePath, int(e2e.DepositCount), minGenesisActiveCount, false /* partial */)
 				if err != nil {
-					r.t.Error(err)
+					r.t.Fatal(err)
 				}
 			}
 			r.testTxGeneration(ctx, g, keystorePath, []e2etypes.ComponentRunner{})
@@ -238,16 +208,16 @@ func (r *testRunner) waitForMatchingHead(ctx context.Context, timeout time.Durat
 	start := time.Now()
 	dctx, cancel := context.WithDeadline(ctx, start.Add(timeout))
 	defer cancel()
-	checkClient := eth.NewBeaconChainClient(check)
-	refClient := eth.NewBeaconChainClient(ref)
+	checkClient := service.NewBeaconChainClient(check)
+	refClient := service.NewBeaconChainClient(ref)
 	for {
 		select {
 		case <-dctx.Done():
-			// deadline ensures that the test eventually exits when beacon node fails to sync in a reasonable timeframe
+			// deadline ensures that the test eventually exits when beacon node fails to sync in a resonable timeframe
 			elapsed := time.Since(start)
 			return fmt.Errorf("deadline exceeded after %s waiting for known good block to appear in checkpoint-synced node", elapsed)
 		default:
-			cResp, err := checkClient.GetChainHead(ctx, &emptypb.Empty{})
+			cResp, err := checkClient.GetBlockRoot(ctx, &v1.BlockRequest{BlockId: []byte("head")})
 			if err != nil {
 				errStatus, ok := status.FromError(err)
 				// in the happy path we expect NotFound results until the node has synced
@@ -256,11 +226,11 @@ func (r *testRunner) waitForMatchingHead(ctx context.Context, timeout time.Durat
 				}
 				return fmt.Errorf("error requesting head from 'check' beacon node")
 			}
-			rResp, err := refClient.GetChainHead(ctx, &emptypb.Empty{})
+			rResp, err := refClient.GetBlockRoot(ctx, &v1.BlockRequest{BlockId: []byte("head")})
 			if err != nil {
 				return errors.Wrap(err, "unexpected error requesting head block root from 'ref' beacon node")
 			}
-			if bytesutil.ToBytes32(cResp.HeadBlockRoot) == bytesutil.ToBytes32(rResp.HeadBlockRoot) {
+			if bytesutil.ToBytes32(cResp.Data.Root) == bytesutil.ToBytes32(rResp.Data.Root) {
 				return nil
 			}
 		}
@@ -325,7 +295,7 @@ func (r *testRunner) testCheckpointSync(ctx context.Context, g *errgroup.Group, 
 	syncEvaluators := []e2etypes.Evaluator{ev.FinishedSyncing, ev.AllNodesHaveSameHead}
 	for _, evaluator := range syncEvaluators {
 		r.t.Run(evaluator.Name, func(t *testing.T) {
-			assert.NoError(t, evaluator.Evaluation(nil, conns...), "Evaluation failed for sync node")
+			assert.NoError(t, evaluator.Evaluation(conns...), "Evaluation failed for sync node")
 		})
 	}
 	return nil
@@ -380,13 +350,9 @@ func (r *testRunner) testBeaconChainSync(ctx context.Context, g *errgroup.Group,
 	// Sleep a slot to make sure the synced state is made.
 	time.Sleep(time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Second)
 	syncEvaluators := []e2etypes.Evaluator{ev.FinishedSyncing, ev.AllNodesHaveSameHead}
-	// Only execute in the middle of an epoch to prevent race conditions around slot 0.
-	ticker := helpers.NewEpochTicker(tickingStartTime, secondsPerEpoch)
-	<-ticker.C()
-	ticker.Done()
 	for _, evaluator := range syncEvaluators {
 		t.Run(evaluator.Name, func(t *testing.T) {
-			assert.NoError(t, evaluator.Evaluation(nil, conns...), "Evaluation failed for sync node")
+			assert.NoError(t, evaluator.Evaluation(conns...), "Evaluation failed for sync node")
 		})
 	}
 	return nil
@@ -447,8 +413,6 @@ func (r *testRunner) defaultEndToEndRun() error {
 		return errors.Wrap(err, "components take too long to start")
 	}
 
-	r.comHandler.printPIDs(t.Logf)
-
 	// Since defer unwraps in LIFO order, parent context will be closed only after logs are written.
 	defer helpers.LogOutput(t)
 	if config.UsePprof {
@@ -480,11 +444,7 @@ func (r *testRunner) defaultEndToEndRun() error {
 		return errors.New("incorrect component type")
 	}
 
-	keypath, err := e2e.TestParams.Paths.MinerKeyPath()
-	if err != nil {
-		return errors.Wrap(err, "error getting miner key path from bazel static files in defaultEndToEndRun")
-	}
-	r.testDepositsAndTx(ctx, g, keypath, []e2etypes.ComponentRunner{beaconNodes})
+	r.testDepositsAndTx(ctx, g, eth1Miner.KeystorePath(), []e2etypes.ComponentRunner{beaconNodes})
 
 	// Create GRPC connection to beacon nodes.
 	conns, closeConns, err := helpers.NewLocalConnections(ctx, e2e.TestParams.BeaconNodeCount)
@@ -497,9 +457,8 @@ func (r *testRunner) defaultEndToEndRun() error {
 	require.NoError(t, err)
 	tickingStartTime := helpers.EpochTickerStartTime(genesis)
 
-	ec := e2etypes.NewEvaluationContext(r.depositor.History())
 	// Run assigned evaluators.
-	if err := r.runEvaluators(ec, conns, tickingStartTime); err != nil {
+	if err := r.runEvaluators(conns, tickingStartTime); err != nil {
 		return errors.Wrap(err, "one or more evaluators failed")
 	}
 
@@ -520,16 +479,17 @@ func (r *testRunner) defaultEndToEndRun() error {
 		if err := r.testCheckpointSync(ctx, g, index, conns, httpEndpoints[0], benr, menr); err != nil {
 			return errors.Wrap(err, "checkpoint sync test failed")
 		}
+		index += 1
 	}
 
 	if config.ExtraEpochs > 0 {
-		if err := r.waitExtra(ctx, primitives.Epoch(config.EpochsToRun+config.ExtraEpochs), conns[0], primitives.Epoch(config.ExtraEpochs)); err != nil {
+		if err := r.waitExtra(ctx, types.Epoch(config.EpochsToRun+config.ExtraEpochs), conns[0], types.Epoch(config.ExtraEpochs)); err != nil {
 			return errors.Wrap(err, "error while waiting for ExtraEpochs")
 		}
 		syncEvaluators := []e2etypes.Evaluator{ev.FinishedSyncing, ev.AllNodesHaveSameHead}
 		for _, evaluator := range syncEvaluators {
 			t.Run(evaluator.Name, func(t *testing.T) {
-				assert.NoError(t, evaluator.Evaluation(nil, conns...), "Evaluation failed for sync node")
+				assert.NoError(t, evaluator.Evaluation(conns...), "Evaluation failed for sync node")
 			})
 		}
 	}
@@ -551,8 +511,6 @@ func (r *testRunner) scenarioRun() error {
 		return errors.Wrap(err, "components take too long to start")
 	}
 
-	r.comHandler.printPIDs(t.Logf)
-
 	// Since defer unwraps in LIFO order, parent context will be closed only after logs are written.
 	defer helpers.LogOutput(t)
 	if config.UsePprof {
@@ -567,11 +525,6 @@ func (r *testRunner) scenarioRun() error {
 	// Blocking, wait period varies depending on number of validators.
 	r.waitForChainStart()
 
-	keypath, err := e2e.TestParams.Paths.MinerKeyPath()
-	require.NoError(t, err, "error getting miner key path from bazel static files in defaultEndToEndRun")
-
-	r.testTxGeneration(ctx, r.comHandler.group, keypath, []e2etypes.ComponentRunner{})
-
 	// Create GRPC connection to beacon nodes.
 	conns, closeConns, err := helpers.NewLocalConnections(ctx, e2e.TestParams.BeaconNodeCount)
 	require.NoError(t, err, "Cannot create local connections")
@@ -583,28 +536,26 @@ func (r *testRunner) scenarioRun() error {
 	require.NoError(t, err)
 	tickingStartTime := helpers.EpochTickerStartTime(genesis)
 
-	ec := e2etypes.NewEvaluationContext(r.depositor.History())
 	// Run assigned evaluators.
-	return r.runEvaluators(ec, conns, tickingStartTime)
+	return r.runEvaluators(conns, tickingStartTime)
 }
-
 func (r *testRunner) addEvent(ev func() error) {
 	r.comHandler.group.Go(ev)
 }
 
-func (r *testRunner) executeProvidedEvaluators(ec *e2etypes.EvaluationContext, currentEpoch uint64, conns []*grpc.ClientConn, evals []e2etypes.Evaluator) {
+func (r *testRunner) executeProvidedEvaluators(currentEpoch uint64, conns []*grpc.ClientConn, evals []e2etypes.Evaluator) {
 	wg := new(sync.WaitGroup)
 	for _, eval := range evals {
 		// Fix reference to evaluator as it will be running
 		// in a separate goroutine.
 		evaluator := eval
 		// Only run if the policy says so.
-		if !evaluator.Policy(primitives.Epoch(currentEpoch)) {
+		if !evaluator.Policy(types.Epoch(currentEpoch)) {
 			continue
 		}
 		wg.Add(1)
 		go r.t.Run(fmt.Sprintf(evaluator.Name, currentEpoch), func(t *testing.T) {
-			err := evaluator.Evaluation(ec, conns...)
+			err := evaluator.Evaluation(conns...)
 			assert.NoError(t, err, "Evaluation failed for epoch %d: %v", currentEpoch, err)
 			wg.Done()
 		})
@@ -617,45 +568,30 @@ func (r *testRunner) executeProvidedEvaluators(ec *e2etypes.EvaluationContext, c
 // Along with that we will also take a single lighthouse node and its validator offline.
 // After 1 epoch we will then attempt to bring it online again.
 //
+//
 // 2) Then we will start testing optimistic sync by engaging our engine proxy.
 // After the proxy has been sending `SYNCING` responses to the beacon node, we
 // will test this with our optimistic sync evaluator to ensure everything works
 // as expected.
-func (r *testRunner) multiScenarioMulticlient(ec *e2etypes.EvaluationContext, epoch uint64, conns []*grpc.ClientConn) bool {
+func (r *testRunner) multiScenarioMulticlient(epoch uint64, conns []*grpc.ClientConn) bool {
 	type ForkchoiceUpdatedResponse struct {
 		Status    *enginev1.PayloadStatus  `json:"payloadStatus"`
 		PayloadId *enginev1.PayloadIDBytes `json:"payloadId"`
 	}
-	lastForkEpoch := forks.LastForkEpoch()
-	freezeStartEpoch := lastForkEpoch + 1
-	freezeEndEpoch := lastForkEpoch + 2
-	optimisticStartEpoch := lastForkEpoch + 6
-	optimisticEndEpoch := lastForkEpoch + 7
-	recoveryEpochStart, recoveryEpochEnd := lastForkEpoch+3, lastForkEpoch+4
-	secondRecoveryEpochStart, secondRecoveryEpochEnd := lastForkEpoch+8, lastForkEpoch+9
-
-	newPayloadMethod := "engine_newPayloadV3"
-	forkChoiceUpdatedMethod := "engine_forkchoiceUpdatedV3"
-	//  Fallback if deneb is not set.
-	if params.BeaconConfig().DenebForkEpoch == math.MaxUint64 {
-		newPayloadMethod = "engine_newPayloadV2"
-		forkChoiceUpdatedMethod = "engine_forkchoiceUpdatedV2"
-	}
-
-	switch primitives.Epoch(epoch) {
-	case freezeStartEpoch:
+	switch epoch {
+	case 9:
 		require.NoError(r.t, r.comHandler.beaconNodes.PauseAtIndex(0))
 		require.NoError(r.t, r.comHandler.validatorNodes.PauseAtIndex(0))
 		return true
-	case freezeEndEpoch:
+	case 10:
 		require.NoError(r.t, r.comHandler.beaconNodes.ResumeAtIndex(0))
 		require.NoError(r.t, r.comHandler.validatorNodes.ResumeAtIndex(0))
 		return true
-	case optimisticStartEpoch:
+	case 14:
 		// Set it for prysm beacon node.
 		component, err := r.comHandler.eth1Proxy.ComponentAtIndex(0)
 		require.NoError(r.t, err)
-		component.(e2etypes.EngineProxy).AddRequestInterceptor(newPayloadMethod, func() interface{} {
+		component.(e2etypes.EngineProxy).AddRequestInterceptor("engine_newPayloadV1", func() interface{} {
 			return &enginev1.PayloadStatus{
 				Status:          enginev1.PayloadStatus_SYNCING,
 				LatestValidHash: make([]byte, 32),
@@ -666,7 +602,7 @@ func (r *testRunner) multiScenarioMulticlient(ec *e2etypes.EvaluationContext, ep
 		// Set it for lighthouse beacon node.
 		component, err = r.comHandler.eth1Proxy.ComponentAtIndex(2)
 		require.NoError(r.t, err)
-		component.(e2etypes.EngineProxy).AddRequestInterceptor(newPayloadMethod, func() interface{} {
+		component.(e2etypes.EngineProxy).AddRequestInterceptor("engine_newPayloadV1", func() interface{} {
 			return &enginev1.PayloadStatus{
 				Status:          enginev1.PayloadStatus_SYNCING,
 				LatestValidHash: make([]byte, 32),
@@ -675,7 +611,7 @@ func (r *testRunner) multiScenarioMulticlient(ec *e2etypes.EvaluationContext, ep
 			return true
 		})
 
-		component.(e2etypes.EngineProxy).AddRequestInterceptor(forkChoiceUpdatedMethod, func() interface{} {
+		component.(e2etypes.EngineProxy).AddRequestInterceptor("engine_forkchoiceUpdatedV1", func() interface{} {
 			return &ForkchoiceUpdatedResponse{
 				Status: &enginev1.PayloadStatus{
 					Status:          enginev1.PayloadStatus_SYNCING,
@@ -687,36 +623,36 @@ func (r *testRunner) multiScenarioMulticlient(ec *e2etypes.EvaluationContext, ep
 			return true
 		})
 		return true
-	case optimisticEndEpoch:
-		evs := []e2etypes.Evaluator{ev.OptimisticSyncEnabled}
-		r.executeProvidedEvaluators(ec, epoch, []*grpc.ClientConn{conns[0]}, evs)
+	case 15:
+		r.executeProvidedEvaluators(epoch, []*grpc.ClientConn{conns[0]}, []e2etypes.Evaluator{
+			ev.OptimisticSyncEnabled,
+		})
 		// Disable Interceptor
 		component, err := r.comHandler.eth1Proxy.ComponentAtIndex(0)
 		require.NoError(r.t, err)
 		engineProxy, ok := component.(e2etypes.EngineProxy)
 		require.Equal(r.t, true, ok)
-		engineProxy.RemoveRequestInterceptor(newPayloadMethod)
-		engineProxy.ReleaseBackedUpRequests(newPayloadMethod)
+		engineProxy.RemoveRequestInterceptor("engine_newPayloadV1")
+		engineProxy.ReleaseBackedUpRequests("engine_newPayloadV1")
 
 		// Remove for lighthouse too
 		component, err = r.comHandler.eth1Proxy.ComponentAtIndex(2)
 		require.NoError(r.t, err)
 		engineProxy, ok = component.(e2etypes.EngineProxy)
 		require.Equal(r.t, true, ok)
-		engineProxy.RemoveRequestInterceptor(newPayloadMethod)
-		engineProxy.RemoveRequestInterceptor(forkChoiceUpdatedMethod)
-		engineProxy.ReleaseBackedUpRequests(newPayloadMethod)
+		engineProxy.RemoveRequestInterceptor("engine_newPayloadV1")
+		engineProxy.RemoveRequestInterceptor("engine_forkchoiceUpdatedV1")
+		engineProxy.ReleaseBackedUpRequests("engine_newPayloadV1")
 
 		return true
-	case recoveryEpochStart, recoveryEpochEnd,
-		secondRecoveryEpochStart, secondRecoveryEpochEnd:
+	case 11, 12, 16, 17:
 		// Allow 2 epochs for the network to finalize again.
 		return true
 	}
 	return false
 }
 
-func (r *testRunner) eeOffline(_ *e2etypes.EvaluationContext, epoch uint64, _ []*grpc.ClientConn) bool {
+func (r *testRunner) eeOffline(epoch uint64, _ []*grpc.ClientConn) bool {
 	switch epoch {
 	case 9:
 		require.NoError(r.t, r.comHandler.eth1Miner.Pause())
@@ -742,45 +678,28 @@ func (r *testRunner) eeOffline(_ *e2etypes.EvaluationContext, epoch uint64, _ []
 // After the proxy has been sending `SYNCING` responses to the beacon node, we
 // will test this with our optimistic sync evaluator to ensure everything works
 // as expected.
-func (r *testRunner) multiScenario(ec *e2etypes.EvaluationContext, epoch uint64, conns []*grpc.ClientConn) bool {
-	lastForkEpoch := forks.LastForkEpoch()
-	freezeStartEpoch := lastForkEpoch + 1
-	freezeEndEpoch := lastForkEpoch + 2
-	valOfflineStartEpoch := lastForkEpoch + 6
-	valOfflineEndEpoch := lastForkEpoch + 7
-	optimisticStartEpoch := lastForkEpoch + 11
-	optimisticEndEpoch := lastForkEpoch + 12
-
-	recoveryEpochStart, recoveryEpochEnd := lastForkEpoch+3, lastForkEpoch+4
-	secondRecoveryEpochStart, secondRecoveryEpochEnd := lastForkEpoch+8, lastForkEpoch+9
-	thirdRecoveryEpochStart, thirdRecoveryEpochEnd := lastForkEpoch+13, lastForkEpoch+14
-
-	newPayloadMethod := "engine_newPayloadV3"
-	//  Fallback if deneb is not set.
-	if params.BeaconConfig().DenebForkEpoch == math.MaxUint64 {
-		newPayloadMethod = "engine_newPayloadV2"
-	}
-	switch primitives.Epoch(epoch) {
-	case freezeStartEpoch:
+func (r *testRunner) multiScenario(epoch uint64, conns []*grpc.ClientConn) bool {
+	switch epoch {
+	case 9:
 		require.NoError(r.t, r.comHandler.beaconNodes.PauseAtIndex(0))
 		require.NoError(r.t, r.comHandler.validatorNodes.PauseAtIndex(0))
 		return true
-	case freezeEndEpoch:
+	case 10:
 		require.NoError(r.t, r.comHandler.beaconNodes.ResumeAtIndex(0))
 		require.NoError(r.t, r.comHandler.validatorNodes.ResumeAtIndex(0))
 		return true
-	case valOfflineStartEpoch:
+	case 14:
 		require.NoError(r.t, r.comHandler.validatorNodes.PauseAtIndex(0))
 		require.NoError(r.t, r.comHandler.validatorNodes.PauseAtIndex(1))
 		return true
-	case valOfflineEndEpoch:
+	case 15:
 		require.NoError(r.t, r.comHandler.validatorNodes.ResumeAtIndex(0))
 		require.NoError(r.t, r.comHandler.validatorNodes.ResumeAtIndex(1))
 		return true
-	case optimisticStartEpoch:
+	case 19:
 		component, err := r.comHandler.eth1Proxy.ComponentAtIndex(0)
 		require.NoError(r.t, err)
-		component.(e2etypes.EngineProxy).AddRequestInterceptor(newPayloadMethod, func() interface{} {
+		component.(e2etypes.EngineProxy).AddRequestInterceptor("engine_newPayloadV1", func() interface{} {
 			return &enginev1.PayloadStatus{
 				Status:          enginev1.PayloadStatus_SYNCING,
 				LatestValidHash: make([]byte, 32),
@@ -789,21 +708,20 @@ func (r *testRunner) multiScenario(ec *e2etypes.EvaluationContext, epoch uint64,
 			return true
 		})
 		return true
-	case optimisticEndEpoch:
-		evs := []e2etypes.Evaluator{ev.OptimisticSyncEnabled}
-		r.executeProvidedEvaluators(ec, epoch, []*grpc.ClientConn{conns[0]}, evs)
+	case 20:
+		r.executeProvidedEvaluators(epoch, []*grpc.ClientConn{conns[0]}, []e2etypes.Evaluator{
+			ev.OptimisticSyncEnabled,
+		})
 		// Disable Interceptor
 		component, err := r.comHandler.eth1Proxy.ComponentAtIndex(0)
 		require.NoError(r.t, err)
 		engineProxy, ok := component.(e2etypes.EngineProxy)
 		require.Equal(r.t, true, ok)
-		engineProxy.RemoveRequestInterceptor(newPayloadMethod)
-		engineProxy.ReleaseBackedUpRequests(newPayloadMethod)
+		engineProxy.RemoveRequestInterceptor("engine_newPayloadV1")
+		engineProxy.ReleaseBackedUpRequests("engine_newPayloadV1")
 
 		return true
-	case recoveryEpochStart, recoveryEpochEnd,
-		secondRecoveryEpochStart, secondRecoveryEpochEnd,
-		thirdRecoveryEpochStart, thirdRecoveryEpochEnd:
+	case 11, 12, 16, 17, 21, 22:
 		// Allow 2 epochs for the network to finalize again.
 		return true
 	}
@@ -811,6 +729,6 @@ func (r *testRunner) multiScenario(ec *e2etypes.EvaluationContext, epoch uint64,
 }
 
 // All Epochs are valid.
-func defaultInterceptor(_ *e2etypes.EvaluationContext, _ uint64, _ []*grpc.ClientConn) bool {
+func defaultInterceptor(_ uint64, _ []*grpc.ClientConn) bool {
 	return false
 }

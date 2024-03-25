@@ -14,16 +14,14 @@ import (
 	"github.com/bazelbuild/rules_go/go/tools/bazel"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/io/file"
-	"github.com/prysmaticlabs/prysm/v5/runtime/interop"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/helpers"
-	e2e "github.com/prysmaticlabs/prysm/v5/testing/endtoend/params"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/types"
-	e2etypes "github.com/prysmaticlabs/prysm/v5/testing/endtoend/types"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/io/file"
+	"github.com/prysmaticlabs/prysm/v3/runtime/interop"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/helpers"
+	e2e "github.com/prysmaticlabs/prysm/v3/testing/endtoend/params"
+	e2etypes "github.com/prysmaticlabs/prysm/v3/testing/endtoend/types"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager"
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
-	"golang.org/x/sync/errgroup"
 )
 
 var _ e2etypes.ComponentRunner = (*LighthouseValidatorNode)(nil)
@@ -172,6 +170,11 @@ func (v *LighthouseValidatorNode) Start(ctx context.Context) error {
 	}
 
 	_, _, index, _ := v.config, v.validatorNum, v.index, v.offset
+	beaconRPCPort := e2e.TestParams.Ports.PrysmBeaconNodeRPCPort + index
+	if beaconRPCPort >= e2e.TestParams.Ports.PrysmBeaconNodeRPCPort+e2e.TestParams.BeaconNodeCount {
+		// Point any extra validator clients to a node we know is running.
+		beaconRPCPort = e2e.TestParams.Ports.PrysmBeaconNodeRPCPort
+	}
 	kPath := e2e.TestParams.TestPath + fmt.Sprintf("/lighthouse-validator-%d", index)
 	testNetDir := e2e.TestParams.TestPath + fmt.Sprintf("/lighthouse-testnet-%d", index)
 	httpPort := e2e.TestParams.Ports.LighthouseBeaconNodeHTTPPort
@@ -188,25 +191,28 @@ func (v *LighthouseValidatorNode) Start(ctx context.Context) error {
 		fmt.Sprintf("--datadir=%s", kPath),
 		fmt.Sprintf("--testnet-dir=%s", testNetDir),
 		fmt.Sprintf("--beacon-nodes=http://localhost:%d", httpPort+index),
-		"--suggested-fee-recipient=0x878705ba3f8bc32fcf7f4caa1a35e72af65cf766",
-	}
-
-	if v.config.UseBuilder {
-		args = append(args, "--builder-proposals")
 	}
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...) // #nosec G204 -- Safe
 
-	// Write stderr to log files.
+	// Write stdout and stderr to log files.
+	stdout, err := os.Create(path.Join(e2e.TestParams.LogPath, fmt.Sprintf("lighthouse_validator_%d_stdout.log", index)))
+	if err != nil {
+		return err
+	}
 	stderr, err := os.Create(path.Join(e2e.TestParams.LogPath, fmt.Sprintf("lighthouse_validator_%d_stderr.log", index)))
 	if err != nil {
 		return err
 	}
 	defer func() {
+		if err := stdout.Close(); err != nil {
+			log.WithError(err).Error("Failed to close stdout file")
+		}
 		if err := stderr.Close(); err != nil {
 			log.WithError(err).Error("Failed to close stderr file")
 		}
 	}()
+	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
 	log.Infof("Starting lighthouse validator client %d with flags: %s %s", index, binaryPath, strings.Join(args, " "))
@@ -240,8 +246,6 @@ func (v *LighthouseValidatorNode) Resume() error {
 func (v *LighthouseValidatorNode) Stop() error {
 	return v.cmd.Process.Kill()
 }
-
-var _ types.ComponentRunner = &KeystoreGenerator{}
 
 type KeystoreGenerator struct {
 	started chan struct{}
@@ -316,50 +320,44 @@ func setupKeystores(valClientIdx, startIdx, numOfKeys int) (string, error) {
 	encryptor := keystorev4.New()
 	// Use lighthouse's default password for their insecure keystores.
 	password := "222222222222222222222222222222222222222222222222222"
-	g, _ := errgroup.WithContext(context.Background())
-	for i, pkey := range pubKeys {
-		pubKeyBytes := pkey.Marshal()
-		marshalledPriv := privKeys[i].Marshal()
-		g.Go(func() error {
-			cryptoFields, err := encryptor.Encrypt(marshalledPriv, password)
-			if err != nil {
-				return errors.Wrapf(
-					err,
-					"could not encrypt secret key for public key %#x",
-					pubKeyBytes,
-				)
-			}
-			id, err := uuid.NewRandom()
-			if err != nil {
-				return err
-			}
-			kStore := &keymanager.Keystore{
-				Crypto:  cryptoFields,
-				ID:      id.String(),
-				Pubkey:  fmt.Sprintf("%x", pubKeyBytes),
-				Version: encryptor.Version(),
-				Name:    encryptor.Name(),
-			}
+	for i, pk := range pubKeys {
+		pubKeyBytes := pk.Marshal()
+		cryptoFields, err := encryptor.Encrypt(privKeys[i].Marshal(), password)
+		if err != nil {
+			return "", errors.Wrapf(
+				err,
+				"could not encrypt secret key for public key %#x",
+				pubKeyBytes,
+			)
+		}
+		id, err := uuid.NewRandom()
+		if err != nil {
+			return "", err
+		}
+		kStore := &keymanager.Keystore{
+			Crypto:  cryptoFields,
+			ID:      id.String(),
+			Pubkey:  fmt.Sprintf("%x", pubKeyBytes),
+			Version: encryptor.Version(),
+			Name:    encryptor.Name(),
+		}
 
-			fPath := filepath.Join(secretsPath, "0x"+kStore.Pubkey)
-			if err := file.WriteFile(fPath, []byte(password)); err != nil {
-				return err
-			}
-			keystorePath := filepath.Join(validatorKeystorePath, "0x"+kStore.Pubkey)
-			if err := file.MkdirAll(keystorePath); err != nil {
-				return err
-			}
-			fPath = filepath.Join(keystorePath, "voting-keystore.json")
-			encodedFile, err := json.MarshalIndent(kStore, "", "\t")
-			if err != nil {
-				return errors.Wrap(err, "could not marshal keystore to JSON file")
-			}
-			return file.WriteFile(fPath, encodedFile)
-		})
+		fPath := filepath.Join(secretsPath, "0x"+kStore.Pubkey)
+		if err := file.WriteFile(fPath, []byte(password)); err != nil {
+			return "", err
+		}
+		keystorePath := filepath.Join(validatorKeystorePath, "0x"+kStore.Pubkey)
+		if err := file.MkdirAll(keystorePath); err != nil {
+			return "", err
+		}
+		fPath = filepath.Join(keystorePath, "voting-keystore.json")
+		encodedFile, err := json.MarshalIndent(kStore, "", "\t")
+		if err != nil {
+			return "", errors.Wrap(err, "could not marshal keystore to JSON file")
+		}
+		if err := file.WriteFile(fPath, encodedFile); err != nil {
+			return "", err
+		}
 	}
-	return testNetDir, g.Wait()
-}
-
-func (k *KeystoreGenerator) UnderlyingProcess() *os.Process {
-	return nil // No subprocess for this component.
+	return testNetDir, nil
 }

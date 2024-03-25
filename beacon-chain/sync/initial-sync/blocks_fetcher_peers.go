@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers/scorers"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/flags"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	mathutil "github.com/prysmaticlabs/prysm/v5/math"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/peers/scorers"
+	"github.com/prysmaticlabs/prysm/v3/cmd/beacon-chain/flags"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	mathutil "github.com/prysmaticlabs/prysm/v3/math"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	"github.com/sirupsen/logrus"
 	"go.opencensus.io/trace"
 )
@@ -93,7 +93,7 @@ func (f *blocksFetcher) waitForMinimumPeers(ctx context.Context) ([]peer.ID, err
 // filterPeers returns transformed list of peers, weight sorted by scores and capacity remaining.
 // List can be further constrained using peersPercentage, where only percentage of peers are returned.
 func (f *blocksFetcher) filterPeers(ctx context.Context, peers []peer.ID, peersPercentage float64) []peer.ID {
-	_, span := trace.StartSpan(ctx, "initialsync.filterPeers")
+	ctx, span := trace.StartSpan(ctx, "initialsync.filterPeers")
 	defer span.End()
 
 	if len(peers) == 0 {
@@ -110,7 +110,7 @@ func (f *blocksFetcher) filterPeers(ctx context.Context, peers []peer.ID, peersP
 		remaining, capacity := float64(f.rateLimiter.Remaining(peerID.String())), float64(f.rateLimiter.Capacity())
 		// When capacity is close to exhaustion, allow less performant peer to take a chance.
 		// Otherwise, there's a good chance system will be forced to wait for rate limiter.
-		if remaining < float64(f.blocksPerPeriod) {
+		if remaining < float64(f.blocksPerSecond) {
 			return 0.0
 		}
 		capScore := remaining / capacity

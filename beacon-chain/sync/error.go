@@ -3,25 +3,19 @@ package sync
 import (
 	"bytes"
 	"errors"
-	"io"
 
-	libp2pcore "github.com/libp2p/go-libp2p/core"
-	"github.com/libp2p/go-libp2p/core/network"
-	multiplex "github.com/libp2p/go-mplex"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/types"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
+	libp2pcore "github.com/libp2p/go-libp2p-core"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/encoder"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/types"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
 	"github.com/sirupsen/logrus"
 )
-
-var ErrNoValidDigest = errors.New("no valid digest matched")
-var ErrUnrecognizedVersion = errors.New("cannot determine context bytes for unrecognized object")
 
 var responseCodeSuccess = byte(0x00)
 var responseCodeInvalidRequest = byte(0x01)
 var responseCodeServerError = byte(0x02)
-var responseCodeResourceUnavailable = byte(0x03)
 
 func (s *Service) generateErrorResponse(code byte, reason string) ([]byte, error) {
 	return createErrorResponse(code, reason, s.cfg.p2p)
@@ -30,7 +24,7 @@ func (s *Service) generateErrorResponse(code byte, reason string) ([]byte, error
 // ReadStatusCode response from a RPC stream.
 func ReadStatusCode(stream network.Stream, encoding encoder.NetworkEncoding) (uint8, string, error) {
 	// Set ttfb deadline.
-	SetStreamReadDeadline(stream, params.BeaconConfig().TtfbTimeoutDuration())
+	SetStreamReadDeadline(stream, params.BeaconNetworkConfig().TtfbTimeout)
 	b := make([]byte, 1)
 	_, err := stream.Read(b)
 	if err != nil {
@@ -39,13 +33,13 @@ func ReadStatusCode(stream network.Stream, encoding encoder.NetworkEncoding) (ui
 
 	if b[0] == responseCodeSuccess {
 		// Set response deadline on a successful response code.
-		SetStreamReadDeadline(stream, params.BeaconConfig().RespTimeoutDuration())
+		SetStreamReadDeadline(stream, params.BeaconNetworkConfig().RespTimeout)
 
 		return 0, "", nil
 	}
 
 	// Set response deadline, when reading error message.
-	SetStreamReadDeadline(stream, params.BeaconConfig().RespTimeoutDuration())
+	SetStreamReadDeadline(stream, params.BeaconNetworkConfig().RespTimeout)
 	msg := &types.ErrorMessage{}
 	if err := encoding.DecodeWithMaxLength(stream, msg); err != nil {
 		return 0, "", err
@@ -100,7 +94,7 @@ func readStatusCodeNoDeadline(stream network.Stream, encoding encoder.NetworkEnc
 func isValidStreamError(err error) bool {
 	// check the error message itself as well as libp2p doesn't currently
 	// return the correct error type from Close{Read,Write,}.
-	return err != nil && !isUnwantedError(err)
+	return err != nil && !errors.Is(err, network.ErrReset) && err.Error() != network.ErrReset.Error()
 }
 
 func closeStream(stream network.Stream, log *logrus.Entry) {
@@ -131,13 +125,4 @@ func closeStreamAndWait(stream network.Stream, log *logrus.Entry) {
 	_ = _err
 	_err = stream.Close()
 	_ = _err
-}
-
-func isUnwantedError(err error) bool {
-	for _, e := range []error{network.ErrReset, multiplex.ErrShutdown, io.EOF, types.ErrIODeadline} {
-		if errors.Is(err, e) || err.Error() == e.Error() {
-			return true
-		}
-	}
-	return false
 }

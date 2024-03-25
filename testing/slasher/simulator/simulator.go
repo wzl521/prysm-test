@@ -5,20 +5,20 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/prysmaticlabs/prysm/v5/async/event"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain"
-	statefeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/state"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/slashings"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/slasher"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stategen"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/sync"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/async/event"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	statefeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/state"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/slashings"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/slasher"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stategen"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/sync"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	"github.com/sirupsen/logrus"
 )
 
@@ -33,16 +33,14 @@ type ServiceConfig struct {
 	HeadStateFetcher            blockchain.HeadFetcher
 	StateGen                    stategen.StateManager
 	SlashingsPool               slashings.PoolManager
-	PrivateKeysByValidatorIndex map[primitives.ValidatorIndex]bls.SecretKey
+	PrivateKeysByValidatorIndex map[types.ValidatorIndex]bls.SecretKey
 	SyncChecker                 sync.Checker
-	ClockWaiter                 startup.ClockWaiter
-	ClockSetter                 startup.ClockSetter
 }
 
 // Parameters for a slasher simulator.
 type Parameters struct {
 	SecondsPerSlot         uint64
-	SlotsPerEpoch          primitives.Slot
+	SlotsPerEpoch          types.Slot
 	AggregationPercent     float64
 	ProposerSlashingProbab float64
 	AttesterSlashingProbab float64
@@ -96,7 +94,6 @@ func New(ctx context.Context, srvConfig *ServiceConfig) (*Simulator, error) {
 		StateGen:                srvConfig.StateGen,
 		SlashingPoolInserter:    srvConfig.SlashingsPool,
 		SyncChecker:             srvConfig.SyncChecker,
-		ClockWaiter:             srvConfig.ClockWaiter,
 	})
 	if err != nil {
 		return nil, err
@@ -145,10 +142,10 @@ func (s *Simulator) Start() {
 	// for slasher to pick up a genesis time.
 	time.Sleep(time.Second)
 	s.genesisTime = time.Now()
-	var vr [32]byte
-	if err := s.srvConfig.ClockSetter.SetClock(startup.NewClock(s.genesisTime, vr)); err != nil {
-		panic(err)
-	}
+	s.srvConfig.StateNotifier.StateFeed().Send(&feed.Event{
+		Type: statefeed.Initialized,
+		Data: &statefeed.InitializedData{StartTime: s.genesisTime},
+	})
 
 	// We simulate blocks and attestations for N epochs.
 	s.simulateBlocksAndAttestations(s.ctx)
@@ -171,7 +168,7 @@ func (s *Simulator) simulateBlocksAndAttestations(ctx context.Context) {
 		select {
 		case slot := <-ticker.C():
 			// We only run the simulator for a specified number of epochs.
-			totalEpochs := primitives.Epoch(s.srvConfig.Params.NumEpochs)
+			totalEpochs := types.Epoch(s.srvConfig.Params.NumEpochs)
 			if slots.ToEpoch(slot) >= totalEpochs {
 				return
 			}
@@ -207,7 +204,7 @@ func (s *Simulator) simulateBlocksAndAttestations(ctx context.Context) {
 
 			atts, attSlashings, err := s.generateAttestationsForSlot(ctx, slot)
 			if err != nil {
-				log.WithError(err).Fatal("Could not generate attestations for slot")
+				log.WithError(err).Fatal("Could not generate block headers for slot")
 			}
 			log.WithFields(logrus.Fields{
 				"numAtts":      len(atts),

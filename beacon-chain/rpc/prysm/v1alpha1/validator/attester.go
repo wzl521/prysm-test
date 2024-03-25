@@ -2,16 +2,21 @@ package validator
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/operation"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/rpc/core"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/operation"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/time"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/transition"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	"go.opencensus.io/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,9 +36,108 @@ func (vs *Server) GetAttestationData(ctx context.Context, req *ethpb.Attestation
 	if vs.SyncChecker.Syncing() {
 		return nil, status.Errorf(codes.Unavailable, "Syncing to latest head, not ready to respond")
 	}
-	res, err := vs.CoreService.GetAttestationData(ctx, req)
+
+	// An optimistic validator MUST NOT participate in attestation. (i.e., sign across the DOMAIN_BEACON_ATTESTER, DOMAIN_SELECTION_PROOF or DOMAIN_AGGREGATE_AND_PROOF domains).
+	if err := vs.optimisticStatus(ctx); err != nil {
+		return nil, err
+	}
+
+	if err := helpers.ValidateAttestationTime(req.Slot, vs.TimeFetcher.GenesisTime(),
+		params.BeaconNetworkConfig().MaximumGossipClockDisparity); err != nil {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("invalid request: %v", err))
+	}
+
+	res, err := vs.AttestationCache.Get(ctx, req)
 	if err != nil {
-		return nil, status.Errorf(core.ErrorReasonToGRPC(err.Reason), "Could not get attestation data: %v", err.Err)
+		return nil, status.Errorf(codes.Internal, "Could not retrieve data from attestation cache: %v", err)
+	}
+	if res != nil {
+		res.CommitteeIndex = req.CommitteeIndex
+		return res, nil
+	}
+
+	if err := vs.AttestationCache.MarkInProgress(req); err != nil {
+		if errors.Is(err, cache.ErrAlreadyInProgress) {
+			res, err := vs.AttestationCache.Get(ctx, req)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "Could not retrieve data from attestation cache: %v", err)
+			}
+			if res == nil {
+				return nil, status.Error(codes.DataLoss, "A request was in progress and resolved to nil")
+			}
+			res.CommitteeIndex = req.CommitteeIndex
+			return res, nil
+		}
+		return nil, status.Errorf(codes.Internal, "Could not mark attestation as in-progress: %v", err)
+	}
+	defer func() {
+		if err := vs.AttestationCache.MarkNotInProgress(req); err != nil {
+			log.WithError(err).Error("Could not mark cache not in progress")
+		}
+	}()
+
+	headState, err := vs.HeadFetcher.HeadState(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Could not retrieve head state: %v", err)
+	}
+	headRoot, err := vs.HeadFetcher.HeadRoot(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Could not retrieve head root: %v", err)
+	}
+
+	// In the case that we receive an attestation request after a newer state/block has been processed.
+	if headState.Slot() > req.Slot {
+		headRoot, err = helpers.BlockRootAtSlot(headState, req.Slot)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not get historical head root: %v", err)
+		}
+		headState, err = vs.StateGen.StateByRoot(ctx, bytesutil.ToBytes32(headRoot))
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not get historical head state: %v", err)
+		}
+	}
+	if headState == nil || headState.IsNil() {
+		return nil, status.Error(codes.Internal, "Could not lookup parent state from head.")
+	}
+
+	if time.CurrentEpoch(headState) < slots.ToEpoch(req.Slot) {
+		headState, err = transition.ProcessSlotsUsingNextSlotCache(ctx, headState, headRoot, req.Slot)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not process slots up to %d: %v", req.Slot, err)
+		}
+	}
+
+	targetEpoch := time.CurrentEpoch(headState)
+	epochStartSlot, err := slots.EpochStart(targetEpoch)
+	if err != nil {
+		return nil, err
+	}
+	var targetRoot []byte
+	if epochStartSlot == headState.Slot() {
+		targetRoot = headRoot
+	} else {
+		targetRoot, err = helpers.BlockRootAtSlot(headState, epochStartSlot)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not get target block for slot %d: %v", epochStartSlot, err)
+		}
+		if bytesutil.ToBytes32(targetRoot) == params.BeaconConfig().ZeroHash {
+			targetRoot = headRoot
+		}
+	}
+
+	res = &ethpb.AttestationData{
+		Slot:            req.Slot,
+		CommitteeIndex:  req.CommitteeIndex,
+		BeaconBlockRoot: headRoot,
+		Source:          headState.CurrentJustifiedCheckpoint(),
+		Target: &ethpb.Checkpoint{
+			Epoch: targetEpoch,
+			Root:  targetRoot,
+		},
+	}
+
+	if err := vs.AttestationCache.Put(ctx, req, res); err != nil {
+		return nil, status.Errorf(codes.Internal, "Could not store attestation data in cache: %v", err)
 	}
 	return res, nil
 }
@@ -101,7 +205,7 @@ func (vs *Server) SubscribeCommitteeSubnets(ctx context.Context, req *ethpb.Comm
 		return nil, status.Error(codes.InvalidArgument, "no attester slots provided")
 	}
 
-	fetchValsLen := func(slot primitives.Slot) (uint64, error) {
+	fetchValsLen := func(slot types.Slot) (uint64, error) {
 		wantedEpoch := slots.ToEpoch(slot)
 		vals, err := vs.HeadFetcher.HeadValidatorsIndices(ctx, wantedEpoch)
 		if err != nil {

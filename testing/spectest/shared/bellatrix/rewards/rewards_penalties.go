@@ -10,13 +10,13 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/altair"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/spectest/utils"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/altair"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	v3 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v3"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/spectest/utils"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
 // Delta contains list of rewards and penalties.
@@ -45,16 +45,8 @@ func RunPrecomputeRewardsAndPenaltiesTests(t *testing.T, config string) {
 	testTypes, err := util.BazelListDirectories(testsFolderPath)
 	require.NoError(t, err)
 
-	if len(testTypes) == 0 {
-		t.Fatalf("No test types found for %s", testsFolderPath)
-	}
-
 	for _, testType := range testTypes {
-		testPath := fmt.Sprintf("rewards/%s/pyspec_tests", testType)
-		testFolders, testsFolderPath := utils.TestFolders(t, config, "bellatrix", testPath)
-		if len(testFolders) == 0 {
-			t.Fatalf("No test folders found for %s/%s/%s", config, "bellatrix", testPath)
-		}
+		testFolders, testsFolderPath := utils.TestFolders(t, config, "bellatrix", fmt.Sprintf("rewards/%s/pyspec_tests", testType))
 		for _, folder := range testFolders {
 			helpers.ClearCache()
 			t.Run(fmt.Sprintf("%v/%v", testType, folder.Name()), func(t *testing.T) {
@@ -73,29 +65,15 @@ func runPrecomputeRewardsAndPenaltiesTest(t *testing.T, testFolderPath string) {
 	require.NoError(t, err, "Failed to decompress")
 	preBeaconStateBase := &ethpb.BeaconStateBellatrix{}
 	require.NoError(t, preBeaconStateBase.UnmarshalSSZ(preBeaconStateSSZ), "Failed to unmarshal")
-	preBeaconState, err := state_native.InitializeFromProtoBellatrix(preBeaconStateBase)
+	preBeaconState, err := v3.InitializeFromProto(preBeaconStateBase)
 	require.NoError(t, err)
 
 	vp, bp, err := altair.InitializePrecomputeValidators(ctx, preBeaconState)
 	require.NoError(t, err)
 	vp, bp, err = altair.ProcessEpochParticipation(ctx, preBeaconState, bp, vp)
 	require.NoError(t, err)
-
-	activeBal, targetPrevious, targetCurrent, err := preBeaconState.UnrealizedCheckpointBalances()
+	rewards, penalties, err := altair.AttestationsDelta(preBeaconState, bp, vp)
 	require.NoError(t, err)
-	require.Equal(t, bp.ActiveCurrentEpoch, activeBal)
-	require.Equal(t, bp.CurrentEpochTargetAttested, targetCurrent)
-	require.Equal(t, bp.PrevEpochTargetAttested, targetPrevious)
-
-	deltas, err := altair.AttestationsDelta(preBeaconState, bp, vp)
-	require.NoError(t, err)
-
-	rewards := make([]uint64, len(deltas))
-	penalties := make([]uint64, len(deltas))
-	for i, d := range deltas {
-		rewards[i] = d.HeadReward + d.SourceReward + d.TargetReward
-		penalties[i] = d.SourcePenalty + d.TargetPenalty + d.InactivityPenalty
-	}
 
 	totalSpecTestRewards := make([]uint64, len(rewards))
 	totalSpecTestPenalties := make([]uint64, len(penalties))

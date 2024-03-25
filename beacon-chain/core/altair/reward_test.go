@@ -4,24 +4,22 @@ import (
 	"math"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/altair"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/altair"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
 func Test_BaseReward(t *testing.T) {
-	helpers.ClearCache()
 	genState := func(valCount uint64) state.ReadOnlyBeaconState {
 		s, _ := util.DeterministicGenesisStateAltair(t, valCount)
 		return s
 	}
 	tests := []struct {
 		name      string
-		valIdx    primitives.ValidatorIndex
+		valIdx    types.ValidatorIndex
 		st        state.ReadOnlyBeaconState
 		want      uint64
 		errString string
@@ -31,7 +29,7 @@ func Test_BaseReward(t *testing.T) {
 			valIdx:    2,
 			st:        genState(1),
 			want:      0,
-			errString: "validator index 2 does not exist",
+			errString: "index 2 out of range",
 		},
 		{
 			name:      "active balance is 32eth",
@@ -68,11 +66,10 @@ func Test_BaseReward(t *testing.T) {
 }
 
 func Test_BaseRewardWithTotalBalance(t *testing.T) {
-	helpers.ClearCache()
 	s, _ := util.DeterministicGenesisStateAltair(t, 1)
 	tests := []struct {
 		name          string
-		valIdx        primitives.ValidatorIndex
+		valIdx        types.ValidatorIndex
 		activeBalance uint64
 		want          uint64
 		errString     string
@@ -89,7 +86,7 @@ func Test_BaseRewardWithTotalBalance(t *testing.T) {
 			valIdx:        2,
 			activeBalance: 1,
 			want:          0,
-			errString:     "validator index 2 does not exist",
+			errString:     "index 2 out of range",
 		},
 		{
 			name:          "active balance is 1",
@@ -140,7 +137,6 @@ func Test_BaseRewardWithTotalBalance(t *testing.T) {
 }
 
 func Test_BaseRewardPerIncrement(t *testing.T) {
-	helpers.ClearCache()
 	tests := []struct {
 		name          string
 		activeBalance uint64

@@ -5,12 +5,13 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
 	"go.opencensus.io/trace"
 )
 
@@ -41,11 +42,11 @@ type CanonicalHistory struct {
 	cache CachedGetter
 }
 
-func (c *CanonicalHistory) ReplayerForSlot(target primitives.Slot) Replayer {
+func (c *CanonicalHistory) ReplayerForSlot(target types.Slot) Replayer {
 	return &stateReplayer{chainer: c, method: forSlot, target: target}
 }
 
-func (c *CanonicalHistory) BlockRootForSlot(ctx context.Context, target primitives.Slot) ([32]byte, error) {
+func (c *CanonicalHistory) BlockRootForSlot(ctx context.Context, target types.Slot) ([32]byte, error) {
 	if currentSlot := c.cs.CurrentSlot(); target > currentSlot {
 		return [32]byte{}, errors.Wrap(ErrFutureSlotRequested, fmt.Sprintf("requested=%d, current=%d", target, currentSlot))
 	}
@@ -103,7 +104,7 @@ func (c *CanonicalHistory) bestForSlot(ctx context.Context, roots [][32]byte) ([
 // and the stategen transition helper methods. This implementation uses the following algorithm:
 // - find the highest canonical block <= the target slot
 // - starting with this block, recursively search backwards for a stored state, and accumulate intervening blocks
-func (c *CanonicalHistory) chainForSlot(ctx context.Context, target primitives.Slot) (state.BeaconState, []interfaces.ReadOnlySignedBeaconBlock, error) {
+func (c *CanonicalHistory) chainForSlot(ctx context.Context, target types.Slot) (state.BeaconState, []interfaces.SignedBeaconBlock, error) {
 	ctx, span := trace.StartSpan(ctx, "canonicalChainer.chainForSlot")
 	defer span.End()
 	r, err := c.BlockRootForSlot(ctx, target)
@@ -140,10 +141,10 @@ func (c *CanonicalHistory) getState(ctx context.Context, blockRoot [32]byte) (st
 // all blocks in the lineage, including the tail block. Blocks are returned in ascending order.
 // Note that this function assumes that the tail is a canonical block, and therefore assumes that
 // all ancestors are also canonical.
-func (c *CanonicalHistory) ancestorChain(ctx context.Context, tail interfaces.ReadOnlySignedBeaconBlock) (state.BeaconState, []interfaces.ReadOnlySignedBeaconBlock, error) {
+func (c *CanonicalHistory) ancestorChain(ctx context.Context, tail interfaces.SignedBeaconBlock) (state.BeaconState, []interfaces.SignedBeaconBlock, error) {
 	ctx, span := trace.StartSpan(ctx, "canonicalChainer.ancestorChain")
 	defer span.End()
-	chain := make([]interfaces.ReadOnlySignedBeaconBlock, 0)
+	chain := make([]interfaces.SignedBeaconBlock, 0)
 	for {
 		if err := ctx.Err(); err != nil {
 			msg := fmt.Sprintf("context canceled while finding ancestors of block at slot %d", tail.Block().Slot())
@@ -171,7 +172,7 @@ func (c *CanonicalHistory) ancestorChain(ctx context.Context, tail interfaces.Re
 		if err != nil && !errors.Is(err, db.ErrNotFoundState) {
 			return nil, nil, errors.Wrap(err, fmt.Sprintf("error querying database for state w/ block root = %#x", root))
 		}
-		parent, err := c.h.Block(ctx, b.ParentRoot())
+		parent, err := c.h.Block(ctx, bytesutil.ToBytes32(b.ParentRoot()))
 		if err != nil {
 			msg := fmt.Sprintf("db error when retrieving parent of block at slot=%d by root=%#x", b.Slot(), b.ParentRoot())
 			return nil, nil, errors.Wrap(err, msg)
@@ -185,7 +186,7 @@ func (c *CanonicalHistory) ancestorChain(ctx context.Context, tail interfaces.Re
 	}
 }
 
-func reverseChain(c []interfaces.ReadOnlySignedBeaconBlock) {
+func reverseChain(c []interfaces.SignedBeaconBlock) {
 	last := len(c) - 1
 	swaps := (last + 1) / 2
 	for i := 0; i < swaps; i++ {

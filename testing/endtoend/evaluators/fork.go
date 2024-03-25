@@ -5,64 +5,32 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/policies"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/types"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/helpers"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/policies"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/types"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	"google.golang.org/grpc"
 )
 
 var streamDeadline = 1 * time.Minute
-var startingFork = version.Phase0
 
 // AltairForkTransition ensures that the Altair hard fork has occurred successfully.
 var AltairForkTransition = types.Evaluator{
-	Name: "altair_fork_transition_%d",
-	Policy: func(e primitives.Epoch) bool {
-		altair := policies.OnEpoch(params.BeaconConfig().AltairForkEpoch)
-		// TODO (11750): modify policies to take an end to end config
-		if startingFork == version.Phase0 {
-			return altair(e)
-		}
-		return false
-	},
+	Name:       "altair_fork_transition_%d",
+	Policy:     policies.OnEpoch(helpers.AltairE2EForkEpoch),
 	Evaluation: altairForkOccurs,
 }
 
 // BellatrixForkTransition ensures that the Bellatrix hard fork has occurred successfully.
 var BellatrixForkTransition = types.Evaluator{
-	Name: "bellatrix_fork_transition_%d",
-	Policy: func(e primitives.Epoch) bool {
-		fEpoch := params.BeaconConfig().BellatrixForkEpoch
-		return policies.OnEpoch(fEpoch)(e)
-	},
+	Name:       "bellatrix_fork_transition_%d",
+	Policy:     policies.OnEpoch(helpers.BellatrixE2EForkEpoch),
 	Evaluation: bellatrixForkOccurs,
 }
 
-// CapellaForkTransition ensures that the Capella hard fork has occurred successfully.
-var CapellaForkTransition = types.Evaluator{
-	Name: "capella_fork_transition_%d",
-	Policy: func(e primitives.Epoch) bool {
-		fEpoch := params.BeaconConfig().CapellaForkEpoch
-		return policies.OnEpoch(fEpoch)(e)
-	},
-	Evaluation: capellaForkOccurs,
-}
-
-var DenebForkTransition = types.Evaluator{
-	Name: "deneb_fork_transition_%d",
-	Policy: func(e primitives.Epoch) bool {
-		fEpoch := params.BeaconConfig().DenebForkEpoch
-		return policies.OnEpoch(fEpoch)(e)
-	},
-	Evaluation: denebForkOccurs,
-}
-
-func altairForkOccurs(_ *types.EvaluationContext, conns ...*grpc.ClientConn) error {
+func altairForkOccurs(conns ...*grpc.ClientConn) error {
 	conn := conns[0]
 	client := ethpb.NewBeaconNodeValidatorClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), streamDeadline)
@@ -71,7 +39,7 @@ func altairForkOccurs(_ *types.EvaluationContext, conns ...*grpc.ClientConn) err
 	if err != nil {
 		return errors.Wrap(err, "failed to get stream")
 	}
-	fSlot, err := slots.EpochStart(params.BeaconConfig().AltairForkEpoch)
+	fSlot, err := slots.EpochStart(helpers.AltairE2EForkEpoch)
 	if err != nil {
 		return err
 	}
@@ -104,7 +72,7 @@ func altairForkOccurs(_ *types.EvaluationContext, conns ...*grpc.ClientConn) err
 	return nil
 }
 
-func bellatrixForkOccurs(_ *types.EvaluationContext, conns ...*grpc.ClientConn) error {
+func bellatrixForkOccurs(conns ...*grpc.ClientConn) error {
 	conn := conns[0]
 	client := ethpb.NewBeaconNodeValidatorClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), streamDeadline)
@@ -113,7 +81,7 @@ func bellatrixForkOccurs(_ *types.EvaluationContext, conns ...*grpc.ClientConn) 
 	if err != nil {
 		return errors.Wrap(err, "failed to get stream")
 	}
-	fSlot, err := slots.EpochStart(params.BeaconConfig().BellatrixForkEpoch)
+	fSlot, err := slots.EpochStart(helpers.BellatrixE2EForkEpoch)
 	if err != nil {
 		return err
 	}
@@ -145,92 +113,6 @@ func bellatrixForkOccurs(_ *types.EvaluationContext, conns ...*grpc.ClientConn) 
 	}
 	if blk.Block().Slot() < fSlot {
 		return errors.Errorf("wanted a block >= %d but received %d", fSlot, blk.Block().Slot())
-	}
-	return nil
-}
-
-func capellaForkOccurs(_ *types.EvaluationContext, conns ...*grpc.ClientConn) error {
-	conn := conns[0]
-	client := ethpb.NewBeaconNodeValidatorClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), streamDeadline)
-	defer cancel()
-	stream, err := client.StreamBlocksAltair(ctx, &ethpb.StreamBlocksRequest{VerifiedOnly: true})
-	if err != nil {
-		return errors.Wrap(err, "failed to get stream")
-	}
-	fSlot, err := slots.EpochStart(params.BeaconConfig().CapellaForkEpoch)
-	if err != nil {
-		return err
-	}
-	if ctx.Err() == context.Canceled {
-		return errors.New("context canceled prematurely")
-	}
-	res, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-	if res == nil || res.Block == nil {
-		return errors.New("nil block returned by beacon node")
-	}
-
-	if res.GetBlock() == nil {
-		return errors.New("nil block returned by beacon node")
-	}
-	if res.GetCapellaBlock() == nil {
-		return errors.Errorf("non-capella block returned after the fork with type %T", res.Block)
-	}
-	blk, err := blocks.NewSignedBeaconBlock(res.GetCapellaBlock())
-	if err != nil {
-		return err
-	}
-	if err := blocks.BeaconBlockIsNil(blk); err != nil {
-		return err
-	}
-	if blk.Block().Slot() < fSlot {
-		return errors.Errorf("wanted a block at slot >= %d but received %d", fSlot, blk.Block().Slot())
-	}
-	return nil
-}
-
-func denebForkOccurs(_ *types.EvaluationContext, conns ...*grpc.ClientConn) error {
-	conn := conns[0]
-	client := ethpb.NewBeaconNodeValidatorClient(conn)
-	ctx, cancel := context.WithTimeout(context.Background(), streamDeadline)
-	defer cancel()
-	stream, err := client.StreamBlocksAltair(ctx, &ethpb.StreamBlocksRequest{VerifiedOnly: true})
-	if err != nil {
-		return errors.Wrap(err, "failed to get stream")
-	}
-	fSlot, err := slots.EpochStart(params.BeaconConfig().DenebForkEpoch)
-	if err != nil {
-		return err
-	}
-	if ctx.Err() == context.Canceled {
-		return errors.New("context canceled prematurely")
-	}
-	res, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-	if res == nil || res.Block == nil {
-		return errors.New("nil block returned by beacon node")
-	}
-
-	if res.GetBlock() == nil {
-		return errors.New("nil block returned by beacon node")
-	}
-	if res.GetDenebBlock() == nil {
-		return errors.Errorf("non-deneb block returned after the fork with type %T", res.Block)
-	}
-	blk, err := blocks.NewSignedBeaconBlock(res.GetDenebBlock())
-	if err != nil {
-		return err
-	}
-	if err := blocks.BeaconBlockIsNil(blk); err != nil {
-		return err
-	}
-	if blk.Block().Slot() < fSlot {
-		return errors.Errorf("wanted a block at slot >= %d but received %d", fSlot, blk.Block().Slot())
 	}
 	return nil
 }

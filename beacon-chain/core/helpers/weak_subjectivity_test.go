@@ -5,22 +5,22 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
 func TestWeakSubjectivity_ComputeWeakSubjectivityPeriod(t *testing.T) {
 	tests := []struct {
 		valCount   uint64
 		avgBalance uint64
-		want       primitives.Epoch
+		want       types.Epoch
 	}{
 		// Asserting that we get the same numbers as defined in the reference table:
 		// https://github.com/ethereum/consensus-specs/blob/master/specs/phase0/weak-subjectivity.md#calculating-the-weak-subjectivity-period
@@ -48,7 +48,6 @@ func TestWeakSubjectivity_ComputeWeakSubjectivityPeriod(t *testing.T) {
 		t.Run(fmt.Sprintf("valCount: %d, avgBalance: %d", tt.valCount, tt.avgBalance), func(t *testing.T) {
 			// Reset committee cache - as we need to recalculate active validator set for each test.
 			helpers.ClearCache()
-
 			got, err := helpers.ComputeWeakSubjectivityPeriod(context.Background(), genState(t, tt.valCount, tt.avgBalance), params.BeaconConfig())
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got, "valCount: %v, avgBalance: %v", tt.valCount, tt.avgBalance)
@@ -56,12 +55,12 @@ func TestWeakSubjectivity_ComputeWeakSubjectivityPeriod(t *testing.T) {
 	}
 }
 
-type mockWsCheckpoint func() (stateRoot [32]byte, blockRoot [32]byte, e primitives.Epoch)
+type mockWsCheckpoint func() (stateRoot [32]byte, blockRoot [32]byte, e types.Epoch)
 
 func TestWeakSubjectivity_IsWithinWeakSubjectivityPeriod(t *testing.T) {
 	tests := []struct {
 		name            string
-		epoch           primitives.Epoch
+		epoch           types.Epoch
 		genWsState      func() state.ReadOnlyBeaconState
 		genWsCheckpoint mockWsCheckpoint
 		want            bool
@@ -72,7 +71,7 @@ func TestWeakSubjectivity_IsWithinWeakSubjectivityPeriod(t *testing.T) {
 			genWsState: func() state.ReadOnlyBeaconState {
 				return nil
 			},
-			genWsCheckpoint: func() ([32]byte, [32]byte, primitives.Epoch) {
+			genWsCheckpoint: func() ([32]byte, [32]byte, types.Epoch) {
 				return [32]byte{}, [32]byte{}, 42
 			},
 			wantedErr: "invalid weak subjectivity state or checkpoint",
@@ -89,7 +88,7 @@ func TestWeakSubjectivity_IsWithinWeakSubjectivityPeriod(t *testing.T) {
 				require.NoError(t, err)
 				return beaconState
 			},
-			genWsCheckpoint: func() ([32]byte, [32]byte, primitives.Epoch) {
+			genWsCheckpoint: func() ([32]byte, [32]byte, types.Epoch) {
 				var sr [32]byte
 				copy(sr[:], bytesutil.PadTo([]byte("stateroot2"), 32))
 				return sr, [32]byte{}, 42
@@ -109,7 +108,7 @@ func TestWeakSubjectivity_IsWithinWeakSubjectivityPeriod(t *testing.T) {
 				require.NoError(t, err)
 				return beaconState
 			},
-			genWsCheckpoint: func() ([32]byte, [32]byte, primitives.Epoch) {
+			genWsCheckpoint: func() ([32]byte, [32]byte, types.Epoch) {
 				var sr [32]byte
 				copy(sr[:], bytesutil.PadTo([]byte("stateroot"), 32))
 				return sr, [32]byte{}, 43
@@ -128,7 +127,7 @@ func TestWeakSubjectivity_IsWithinWeakSubjectivityPeriod(t *testing.T) {
 				require.NoError(t, err)
 				return beaconState
 			},
-			genWsCheckpoint: func() ([32]byte, [32]byte, primitives.Epoch) {
+			genWsCheckpoint: func() ([32]byte, [32]byte, types.Epoch) {
 				var sr [32]byte
 				copy(sr[:], bytesutil.PadTo([]byte("stateroot"), 32))
 				return sr, [32]byte{}, 42
@@ -148,7 +147,7 @@ func TestWeakSubjectivity_IsWithinWeakSubjectivityPeriod(t *testing.T) {
 				require.NoError(t, err)
 				return beaconState
 			},
-			genWsCheckpoint: func() ([32]byte, [32]byte, primitives.Epoch) {
+			genWsCheckpoint: func() ([32]byte, [32]byte, types.Epoch) {
 				var sr [32]byte
 				copy(sr[:], bytesutil.PadTo([]byte("stateroot"), 32))
 				return sr, [32]byte{}, 42
@@ -168,7 +167,7 @@ func TestWeakSubjectivity_IsWithinWeakSubjectivityPeriod(t *testing.T) {
 				require.NoError(t, err)
 				return beaconState
 			},
-			genWsCheckpoint: func() ([32]byte, [32]byte, primitives.Epoch) {
+			genWsCheckpoint: func() ([32]byte, [32]byte, types.Epoch) {
 				var sr [32]byte
 				copy(sr[:], bytesutil.PadTo([]byte("stateroot"), 32))
 				return sr, [32]byte{}, 42
@@ -178,8 +177,6 @@ func TestWeakSubjectivity_IsWithinWeakSubjectivityPeriod(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			helpers.ClearCache()
-
 			sr, _, e := tt.genWsCheckpoint()
 			got, err := helpers.IsWithinWeakSubjectivityPeriod(context.Background(), tt.epoch, tt.genWsState(), sr, e, params.BeaconConfig())
 			if tt.wantedErr != "" {
@@ -220,7 +217,7 @@ func TestWeakSubjectivity_ParseWeakSubjectivityInputString(t *testing.T) {
 			input: "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:123456789",
 			checkpt: &ethpb.Checkpoint{
 				Root:  []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-				Epoch: primitives.Epoch(123456789),
+				Epoch: types.Epoch(123456789),
 			},
 		},
 		{
@@ -228,7 +225,7 @@ func TestWeakSubjectivity_ParseWeakSubjectivityInputString(t *testing.T) {
 			input: "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:123456789",
 			checkpt: &ethpb.Checkpoint{
 				Root:  []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-				Epoch: primitives.Epoch(123456789),
+				Epoch: types.Epoch(123456789),
 			},
 		},
 		{
@@ -236,7 +233,7 @@ func TestWeakSubjectivity_ParseWeakSubjectivityInputString(t *testing.T) {
 			input: "0xF0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:123456789",
 			checkpt: &ethpb.Checkpoint{
 				Root:  []byte{0xf0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-				Epoch: primitives.Epoch(123456789),
+				Epoch: types.Epoch(123456789),
 			},
 		},
 		{
@@ -244,14 +241,12 @@ func TestWeakSubjectivity_ParseWeakSubjectivityInputString(t *testing.T) {
 			input: "F0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:123456789",
 			checkpt: &ethpb.Checkpoint{
 				Root:  []byte{0xf0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-				Epoch: primitives.Epoch(123456789),
+				Epoch: types.Epoch(123456789),
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			helpers.ClearCache()
-
 			wsCheckpt, err := helpers.ParseWeakSubjectivityInputString(tt.input)
 			if tt.wantedErr != "" {
 				require.ErrorContains(t, tt.wantedErr, err)
@@ -285,22 +280,4 @@ func genState(t *testing.T, valCount, avgBalance uint64) state.BeaconState {
 	require.NoError(t, beaconState.SetBalances(balances))
 
 	return beaconState
-}
-
-func TestMinEpochsForBlockRequests(t *testing.T) {
-	helpers.ClearCache()
-
-	params.SetActiveTestCleanup(t, params.MainnetConfig())
-	var expected primitives.Epoch = 33024
-	// expected value of 33024 via spec commentary:
-	// https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#why-are-blocksbyrange-requests-only-required-to-be-served-for-the-latest-min_epochs_for_block_requests-epochs
-	//	MIN_EPOCHS_FOR_BLOCK_REQUESTS is calculated using the arithmetic from compute_weak_subjectivity_period found in the weak subjectivity guide. Specifically to find this max epoch range, we use the worst case event of a very large validator size (>= MIN_PER_EPOCH_CHURN_LIMIT * CHURN_LIMIT_QUOTIENT).
-	//
-	//	MIN_EPOCHS_FOR_BLOCK_REQUESTS = (
-	//	    MIN_VALIDATOR_WITHDRAWABILITY_DELAY
-	//	    + MAX_SAFETY_DECAY * CHURN_LIMIT_QUOTIENT // (2 * 100)
-	//	)
-	//
-	//	Where MAX_SAFETY_DECAY = 100 and thus MIN_EPOCHS_FOR_BLOCK_REQUESTS = 33024 (~5 months).
-	require.Equal(t, expected, helpers.MinEpochsForBlockRequests())
 }

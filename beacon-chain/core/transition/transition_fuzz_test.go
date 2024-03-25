@@ -5,19 +5,19 @@ import (
 	"testing"
 
 	fuzz "github.com/google/gofuzz"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/time"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/time"
+	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func TestFuzzExecuteStateTransition_1000(t *testing.T) {
 	SkipSlotCache.Disable()
 	defer SkipSlotCache.Enable()
 	ctx := context.Background()
-	state, err := state_native.InitializeFromProtoUnsafePhase0(&ethpb.BeaconState{})
+	state, err := v1.InitializeFromProtoUnsafe(&ethpb.BeaconState{})
 	require.NoError(t, err)
 	sb := &ethpb.SignedBeaconBlock{}
 	fuzzer := fuzz.NewWithSeed(0)
@@ -41,7 +41,7 @@ func TestFuzzCalculateStateRoot_1000(t *testing.T) {
 	SkipSlotCache.Disable()
 	defer SkipSlotCache.Enable()
 	ctx := context.Background()
-	state, err := state_native.InitializeFromProtoUnsafePhase0(&ethpb.BeaconState{})
+	state, err := v1.InitializeFromProtoUnsafe(&ethpb.BeaconState{})
 	require.NoError(t, err)
 	sb := &ethpb.SignedBeaconBlock{}
 	fuzzer := fuzz.NewWithSeed(0)
@@ -65,7 +65,7 @@ func TestFuzzProcessSlot_1000(t *testing.T) {
 	SkipSlotCache.Disable()
 	defer SkipSlotCache.Enable()
 	ctx := context.Background()
-	state, err := state_native.InitializeFromProtoUnsafePhase0(&ethpb.BeaconState{})
+	state, err := v1.InitializeFromProtoUnsafe(&ethpb.BeaconState{})
 	require.NoError(t, err)
 	fuzzer := fuzz.NewWithSeed(0)
 	fuzzer.NilChance(0.1)
@@ -82,9 +82,9 @@ func TestFuzzProcessSlots_1000(t *testing.T) {
 	SkipSlotCache.Disable()
 	defer SkipSlotCache.Enable()
 	ctx := context.Background()
-	state, err := state_native.InitializeFromProtoUnsafePhase0(&ethpb.BeaconState{})
+	state, err := v1.InitializeFromProtoUnsafe(&ethpb.BeaconState{})
 	require.NoError(t, err)
-	slot := primitives.Slot(0)
+	slot := types.Slot(0)
 	fuzzer := fuzz.NewWithSeed(0)
 	fuzzer.NilChance(0.1)
 	for i := 0; i < 1000; i++ {
@@ -101,20 +101,20 @@ func TestFuzzprocessOperationsNoVerify_1000(t *testing.T) {
 	SkipSlotCache.Disable()
 	defer SkipSlotCache.Enable()
 	ctx := context.Background()
-	state, err := state_native.InitializeFromProtoUnsafePhase0(&ethpb.BeaconState{})
+	state, err := v1.InitializeFromProtoUnsafe(&ethpb.BeaconState{})
 	require.NoError(t, err)
-	bb := &ethpb.BeaconBlock{}
+	bb := &ethpb.SignedBeaconBlock{}
 	fuzzer := fuzz.NewWithSeed(0)
 	fuzzer.NilChance(0.1)
 	for i := 0; i < 1000; i++ {
 		fuzzer.Fuzz(state)
 		fuzzer.Fuzz(bb)
-		if bb.Body == nil {
+		if bb.Block == nil || bb.Block.Body == nil {
 			continue
 		}
-		wb, err := blocks.NewBeaconBlock(bb)
+		wsb, err := blocks.NewSignedBeaconBlock(bb)
 		require.NoError(t, err)
-		s, err := ProcessOperationsNoVerifyAttsSigs(ctx, state, wb)
+		s, err := ProcessOperationsNoVerifyAttsSigs(ctx, state, wsb)
 		if err != nil && s != nil {
 			t.Fatalf("state should be nil on err. found: %v on error: %v for block body: %v", s, err, bb)
 		}
@@ -124,20 +124,20 @@ func TestFuzzprocessOperationsNoVerify_1000(t *testing.T) {
 func TestFuzzverifyOperationLengths_10000(t *testing.T) {
 	SkipSlotCache.Disable()
 	defer SkipSlotCache.Enable()
-	state, err := state_native.InitializeFromProtoUnsafePhase0(&ethpb.BeaconState{})
+	state, err := v1.InitializeFromProtoUnsafe(&ethpb.BeaconState{})
 	require.NoError(t, err)
-	bb := &ethpb.BeaconBlock{}
+	bb := &ethpb.SignedBeaconBlock{}
 	fuzzer := fuzz.NewWithSeed(0)
 	fuzzer.NilChance(0.1)
 	for i := 0; i < 10000; i++ {
 		fuzzer.Fuzz(state)
 		fuzzer.Fuzz(bb)
-		if bb.Body == nil {
+		if bb.Block == nil || bb.Block.Body == nil {
 			continue
 		}
-		wb, err := blocks.NewBeaconBlock(bb)
+		wsb, err := blocks.NewSignedBeaconBlock(bb)
 		require.NoError(t, err)
-		_, err = VerifyOperationLengths(context.Background(), state, wb)
+		_, err = VerifyOperationLengths(context.Background(), state, wsb)
 		_ = err
 	}
 }
@@ -145,7 +145,7 @@ func TestFuzzverifyOperationLengths_10000(t *testing.T) {
 func TestFuzzCanProcessEpoch_10000(t *testing.T) {
 	SkipSlotCache.Disable()
 	defer SkipSlotCache.Enable()
-	state, err := state_native.InitializeFromProtoUnsafePhase0(&ethpb.BeaconState{})
+	state, err := v1.InitializeFromProtoUnsafe(&ethpb.BeaconState{})
 	require.NoError(t, err)
 	fuzzer := fuzz.NewWithSeed(0)
 	fuzzer.NilChance(0.1)
@@ -159,7 +159,7 @@ func TestFuzzProcessEpochPrecompute_1000(t *testing.T) {
 	SkipSlotCache.Disable()
 	defer SkipSlotCache.Enable()
 	ctx := context.Background()
-	state, err := state_native.InitializeFromProtoUnsafePhase0(&ethpb.BeaconState{})
+	state, err := v1.InitializeFromProtoUnsafe(&ethpb.BeaconState{})
 	require.NoError(t, err)
 	fuzzer := fuzz.NewWithSeed(0)
 	fuzzer.NilChance(0.1)
@@ -176,7 +176,7 @@ func TestFuzzProcessBlockForStateRoot_1000(t *testing.T) {
 	SkipSlotCache.Disable()
 	defer SkipSlotCache.Enable()
 	ctx := context.Background()
-	state, err := state_native.InitializeFromProtoUnsafePhase0(&ethpb.BeaconState{})
+	state, err := v1.InitializeFromProtoUnsafe(&ethpb.BeaconState{})
 	require.NoError(t, err)
 	sb := &ethpb.SignedBeaconBlock{}
 	fuzzer := fuzz.NewWithSeed(0)
@@ -184,7 +184,7 @@ func TestFuzzProcessBlockForStateRoot_1000(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		fuzzer.Fuzz(state)
 		fuzzer.Fuzz(sb)
-		if sb.Block == nil || sb.Block.Body == nil || sb.Block.Body.Eth1Data == nil {
+		if sb.Block == nil || sb.Block.Body == nil {
 			continue
 		}
 		wsb, err := blocks.NewSignedBeaconBlock(sb)

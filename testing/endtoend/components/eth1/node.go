@@ -2,7 +2,6 @@ package eth1
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,12 +12,9 @@ import (
 
 	"github.com/bazelbuild/rules_go/go/tools/bazel"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/io/file"
-	"github.com/prysmaticlabs/prysm/v5/runtime/interop"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/helpers"
-	e2e "github.com/prysmaticlabs/prysm/v5/testing/endtoend/params"
-	e2etypes "github.com/prysmaticlabs/prysm/v5/testing/endtoend/types"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/helpers"
+	e2e "github.com/prysmaticlabs/prysm/v3/testing/endtoend/params"
+	e2etypes "github.com/prysmaticlabs/prysm/v3/testing/endtoend/types"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -56,26 +52,12 @@ func (node *Node) Start(ctx context.Context) error {
 		}
 	}
 
-	if err := file.MkdirAll(eth1Path); err != nil {
-		return err
-	}
-	gethJsonPath := path.Join(eth1Path, "genesis.json")
-
-	gen := interop.GethTestnetGenesis(e2e.TestParams.Eth1GenesisTime, params.BeaconConfig())
-	b, err := json.Marshal(gen)
-	if err != nil {
-		return err
-	}
-
-	if err := file.WriteFile(gethJsonPath, b); err != nil {
-		return err
-	}
-	copyPath := path.Join(e2e.TestParams.LogPath, "eth1-genesis.json")
-	if err := file.WriteFile(copyPath, b); err != nil {
-		return err
-	}
-
-	initCmd := exec.CommandContext(ctx, binaryPath, "init", fmt.Sprintf("--datadir=%s", eth1Path), gethJsonPath) // #nosec G204 -- Safe
+	initCmd := exec.CommandContext(
+		ctx,
+		binaryPath,
+		"init",
+		fmt.Sprintf("--datadir=%s", eth1Path),
+		binaryPath[:strings.LastIndex(binaryPath, "/")]+"/genesis.json") // #nosec G204 -- Safe
 	initFile, err := helpers.DeleteAndCreateFile(e2e.TestParams.LogPath, "eth1-init_"+strconv.Itoa(node.index)+".log")
 	if err != nil {
 		return err
@@ -89,7 +71,6 @@ func (node *Node) Start(ctx context.Context) error {
 	}
 
 	args := []string{
-		"--nat=none", // disable nat traversal in e2e, it is failure prone and not needed
 		fmt.Sprintf("--datadir=%s", eth1Path),
 		fmt.Sprintf("--http.port=%d", e2e.TestParams.Ports.Eth1RPCPort+node.index),
 		fmt.Sprintf("--ws.port=%d", e2e.TestParams.Ports.Eth1WSPort+node.index),
@@ -112,41 +93,26 @@ func (node *Node) Start(ctx context.Context) error {
 		"--syncmode=full",
 		fmt.Sprintf("--txpool.locals=%s", EthAddress),
 	}
-
-	// give the miner start a couple of tries, since the p2p networking check is flaky
-	var retryErr error
-	for retries := 0; retries < 3; retries++ {
-		retryErr = nil
-		log.Infof("Starting eth1 node %d, attempt %d with flags: %s", node.index, retries, strings.Join(args[2:], " "))
-		runCmd := exec.CommandContext(ctx, binaryPath, args...) // #nosec G204 -- Safe
-		errLog, err := os.Create(path.Join(e2e.TestParams.LogPath, "eth1_"+strconv.Itoa(node.index)+".log"))
-		if err != nil {
-			return err
-		}
-		runCmd.Stderr = errLog
-		if err = runCmd.Start(); err != nil {
-			return fmt.Errorf("failed to start eth1 chain: %w", err)
-		}
-		if err = helpers.WaitForTextInFile(errLog, "Started P2P networking"); err != nil {
-			kerr := runCmd.Process.Kill()
-			if kerr != nil {
-				log.WithError(kerr).Error("error sending kill to failed node command process")
-			}
-			retryErr = fmt.Errorf("P2P log not found, this means the eth1 chain had issues starting: %w", err)
-			continue
-		}
-		node.cmd = runCmd
-		log.Infof("eth1 node started after %d retries", retries)
-		break
+	runCmd := exec.CommandContext(ctx, binaryPath, args...) // #nosec G204 -- Safe
+	file, err := os.Create(path.Join(e2e.TestParams.LogPath, "eth1_"+strconv.Itoa(node.index)+".log"))
+	if err != nil {
+		return err
 	}
-	if retryErr != nil {
-		return retryErr
+	runCmd.Stderr = file
+	log.Infof("Starting eth1 node %d with flags: %s", node.index, strings.Join(args[2:], " "))
+
+	if err = runCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start eth1 chain: %w", err)
+	}
+	if err = helpers.WaitForTextInFile(file, "Started P2P networking"); err != nil {
+		return fmt.Errorf("P2P log not found, this means the eth1 chain had issues starting: %w", err)
 	}
 
 	// Mark node as ready.
 	close(node.started)
+	node.cmd = runCmd
 
-	return node.cmd.Wait()
+	return runCmd.Wait()
 }
 
 // Started checks whether ETH1 node is started and ready to be queried.
@@ -167,8 +133,4 @@ func (node *Node) Resume() error {
 // Stop kills the component and its underlying process.
 func (node *Node) Stop() error {
 	return node.cmd.Process.Kill()
-}
-
-func (node *Node) UnderlyingProcess() *os.Process {
-	return node.cmd.Process
 }

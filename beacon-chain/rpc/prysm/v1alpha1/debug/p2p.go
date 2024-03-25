@@ -4,11 +4,10 @@ import (
 	"context"
 
 	"github.com/golang/protobuf/ptypes/empty"
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -22,7 +21,7 @@ func (ds *Server) GetPeer(_ context.Context, peerReq *ethpb.PeerRequest) (*ethpb
 	return ds.getPeer(pid)
 }
 
-// ListPeers returns all peers known to the host node, regardless of if they are connected/
+// ListPeers returns all peers known to the host node, irregardless of if they are connected/
 // disconnected.
 func (ds *Server) ListPeers(_ context.Context, _ *empty.Empty) (*ethpb.DebugPeerResponses, error) {
 	var responses []*ethpb.DebugPeerResponse
@@ -93,7 +92,7 @@ func (ds *Server) getPeer(pid peer.ID) (*ethpb.DebugPeerResponse, error) {
 		aVersion = ""
 	}
 	peerInfo := &ethpb.DebugPeerResponse_PeerInfo{
-		Protocols:       protocol.ConvertToStrings(protocols),
+		Protocols:       protocols,
 		FaultCount:      uint64(resp),
 		ProtocolVersion: pVersion,
 		AgentVersion:    aVersion,

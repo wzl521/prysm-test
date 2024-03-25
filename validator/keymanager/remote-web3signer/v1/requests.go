@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
-	validatorpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/validator-client"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
+	validatorpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/validator-client"
 )
 
 // GetBlockSignRequest maps the request for signing type BLOCK.
@@ -16,7 +16,7 @@ func GetBlockSignRequest(request *validatorpb.SignRequest, genesisValidatorsRoot
 		return nil, errors.New("failed to cast request object to block")
 	}
 	if beaconBlock == nil {
-		return nil, errors.New("invalid sign request: ReadOnlyBeaconBlock is nil")
+		return nil, errors.New("invalid sign request: BeaconBlock is nil")
 	}
 	fork, err := MapForkInfo(request.SigningSlot, genesisValidatorsRoot)
 	if err != nil {
@@ -120,7 +120,7 @@ func GetBlockAltairSignRequest(request *validatorpb.SignRequest, genesisValidato
 		return nil, errors.New("failed to cast request object to block altair")
 	}
 	if beaconBlockAltair == nil {
-		return nil, errors.New("invalid sign request: ReadOnlyBeaconBlock is nil")
+		return nil, errors.New("invalid sign request: BeaconBlock is nil")
 	}
 	fork, err := MapForkInfo(request.SigningSlot, genesisValidatorsRoot)
 	if err != nil {
@@ -271,23 +271,20 @@ func GetSyncCommitteeContributionAndProofSignRequest(request *validatorpb.SignRe
 	}, nil
 }
 
-// GetBlockV2BlindedSignRequest maps the request for signing types (GetBlockV2 id defined by the remote signer interface and not the beacon APIs)
-// Supports Bellatrix, Capella, Deneb
-func GetBlockV2BlindedSignRequest(request *validatorpb.SignRequest, genesisValidatorsRoot []byte) (*BlockV2BlindedSignRequest, error) {
+// GetBlockBellatrixSignRequest maps the request for signing type BLOCK_V2_BELLATRIX.
+func GetBlockBellatrixSignRequest(request *validatorpb.SignRequest, genesisValidatorsRoot []byte) (*BlockBellatrixSignRequest, error) {
 	if request == nil {
 		return nil, errors.New("nil sign request provided")
 	}
-	var b interfaces.ReadOnlyBeaconBlock
-	var version string
+	var b interfaces.BeaconBlock
 	switch request.Object.(type) {
 	case *validatorpb.SignRequest_BlindedBlockBellatrix:
-		version = "BELLATRIX"
 		blindedBlockBellatrix, ok := request.Object.(*validatorpb.SignRequest_BlindedBlockBellatrix)
 		if !ok {
 			return nil, errors.New("failed to cast request object to blinded block bellatrix")
 		}
 		if blindedBlockBellatrix == nil {
-			return nil, errors.New("invalid sign request - blinded bellatrix block is nil")
+			return nil, errors.New("invalid sign request - blindedBlockBellatrix is nil")
 		}
 		beaconBlock, err := blocks.NewBeaconBlock(blindedBlockBellatrix.BlindedBlockBellatrix)
 		if err != nil {
@@ -295,72 +292,15 @@ func GetBlockV2BlindedSignRequest(request *validatorpb.SignRequest, genesisValid
 		}
 		b = beaconBlock
 	case *validatorpb.SignRequest_BlockBellatrix:
-		version = "BELLATRIX"
 		blockBellatrix, ok := request.Object.(*validatorpb.SignRequest_BlockBellatrix)
 		if !ok {
-			return nil, errors.New("failed to cast request object to bellatrix block")
+			return nil, errors.New("failed to cast request object to block v3 bellatrix")
 		}
 
 		if blockBellatrix == nil {
-			return nil, errors.New("invalid sign request: bellatrix block is nil")
+			return nil, errors.New("invalid sign request: blockBellatrix is nil")
 		}
 		beaconBlock, err := blocks.NewBeaconBlock(blockBellatrix.BlockBellatrix)
-		if err != nil {
-			return nil, err
-		}
-		b = beaconBlock
-	case *validatorpb.SignRequest_BlockCapella:
-		version = "CAPELLA"
-		blockCapella, ok := request.Object.(*validatorpb.SignRequest_BlockCapella)
-		if !ok {
-			return nil, errors.New("failed to cast request object to capella block")
-		}
-		if blockCapella == nil {
-			return nil, errors.New("invalid sign request: capella block is nil")
-		}
-		beaconBlock, err := blocks.NewBeaconBlock(blockCapella.BlockCapella)
-		if err != nil {
-			return nil, err
-		}
-		b = beaconBlock
-	case *validatorpb.SignRequest_BlindedBlockCapella:
-		version = "CAPELLA"
-		blindedBlockCapella, ok := request.Object.(*validatorpb.SignRequest_BlindedBlockCapella)
-		if !ok {
-			return nil, errors.New("failed to cast request object to blinded capella block")
-		}
-		if blindedBlockCapella == nil {
-			return nil, errors.New("invalid sign request: blinded capella block is nil")
-		}
-		beaconBlock, err := blocks.NewBeaconBlock(blindedBlockCapella.BlindedBlockCapella)
-		if err != nil {
-			return nil, err
-		}
-		b = beaconBlock
-	case *validatorpb.SignRequest_BlockDeneb:
-		version = "DENEB"
-		blockDeneb, ok := request.Object.(*validatorpb.SignRequest_BlockDeneb)
-		if !ok {
-			return nil, errors.New("failed to cast request object to deneb block")
-		}
-		if blockDeneb == nil {
-			return nil, errors.New("invalid sign request: deneb block is nil")
-		}
-		beaconBlock, err := blocks.NewBeaconBlock(blockDeneb.BlockDeneb)
-		if err != nil {
-			return nil, err
-		}
-		b = beaconBlock
-	case *validatorpb.SignRequest_BlindedBlockDeneb:
-		version = "DENEB"
-		blindedBlockDeneb, ok := request.Object.(*validatorpb.SignRequest_BlindedBlockDeneb)
-		if !ok {
-			return nil, errors.New("failed to cast request object to blinded deneb block")
-		}
-		if blindedBlockDeneb == nil {
-			return nil, errors.New("invalid sign request: blinded deneb block is nil")
-		}
-		beaconBlock, err := blocks.NewBeaconBlock(blindedBlockDeneb.BlindedBlockDeneb)
 		if err != nil {
 			return nil, err
 		}
@@ -376,12 +316,12 @@ func GetBlockV2BlindedSignRequest(request *validatorpb.SignRequest, genesisValid
 	if err != nil {
 		return nil, err
 	}
-	return &BlockV2BlindedSignRequest{
+	return &BlockBellatrixSignRequest{
 		Type:        "BLOCK_V2",
 		ForkInfo:    fork,
 		SigningRoot: request.SigningRoot,
-		BeaconBlock: &BeaconBlockV2Blinded{
-			Version: version,
+		BeaconBlock: &BeaconBlockBellatrixBlockV2{
+			Version: "BELLATRIX",
 			BlockHeader: &BeaconBlockHeader{
 				Slot:          fmt.Sprint(beaconBlockHeader.Slot),
 				ProposerIndex: fmt.Sprint(beaconBlockHeader.ProposerIndex),

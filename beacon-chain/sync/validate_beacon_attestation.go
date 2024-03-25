@@ -6,23 +6,22 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/blocks"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/operation"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/monitoring/tracing"
-	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/attestation"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/blocks"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/operation"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/monitoring/tracing"
+	eth "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/attestation"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	"go.opencensus.io/trace"
 )
 
@@ -78,7 +77,7 @@ func (s *Service) validateCommitteeIndexBeaconAttestation(ctx context.Context, p
 
 	// Attestation's slot is within ATTESTATION_PROPAGATION_SLOT_RANGE and early attestation
 	// processing tolerance.
-	if err := helpers.ValidateAttestationTime(att.Data.Slot, s.cfg.clock.GenesisTime(),
+	if err := helpers.ValidateAttestationTime(att.Data.Slot, s.cfg.chain.GenesisTime(),
 		earlyAttestationProcessingTolerance); err != nil {
 		tracing.AnnotateError(span, err)
 		return pubsub.ValidationIgnore, err
@@ -137,9 +136,9 @@ func (s *Service) validateCommitteeIndexBeaconAttestation(ctx context.Context, p
 		return pubsub.ValidationIgnore, nil
 	}
 
-	if !s.cfg.chain.InForkchoice(bytesutil.ToBytes32(att.Data.BeaconBlockRoot)) {
-		tracing.AnnotateError(span, blockchain.ErrNotDescendantOfFinalized)
-		return pubsub.ValidationIgnore, blockchain.ErrNotDescendantOfFinalized
+	if err := s.cfg.chain.VerifyFinalizedConsistency(ctx, att.Data.BeaconBlockRoot); err != nil {
+		tracing.AnnotateError(span, err)
+		return pubsub.ValidationIgnore, err
 	}
 	if err := s.cfg.chain.VerifyLmdFfgConsistency(ctx, att); err != nil {
 		tracing.AnnotateError(span, err)
@@ -175,9 +174,14 @@ func (s *Service) validateUnaggregatedAttTopic(ctx context.Context, a *eth.Attes
 	ctx, span := trace.StartSpan(ctx, "sync.validateUnaggregatedAttTopic")
 	defer span.End()
 
-	valCount, result, err := s.validateCommitteeIndex(ctx, a, bs)
-	if result != pubsub.ValidationAccept {
-		return result, err
+	valCount, err := helpers.ActiveValidatorCount(ctx, bs, slots.ToEpoch(a.Data.Slot))
+	if err != nil {
+		tracing.AnnotateError(span, err)
+		return pubsub.ValidationIgnore, err
+	}
+	count := helpers.SlotCommitteeCount(valCount)
+	if uint64(a.Data.CommitteeIndex) > count {
+		return pubsub.ValidationReject, errors.Errorf("committee index %d > %d", a.Data.CommitteeIndex, count)
 	}
 	subnet := helpers.ComputeSubnetForAttestation(valCount, a)
 	format := p2p.GossipTypeMapping[reflect.TypeOf(&eth.Attestation{})]
@@ -193,27 +197,21 @@ func (s *Service) validateUnaggregatedAttTopic(ctx context.Context, a *eth.Attes
 	return pubsub.ValidationAccept, nil
 }
 
-func (s *Service) validateCommitteeIndex(ctx context.Context, a *eth.Attestation, bs state.ReadOnlyBeaconState) (uint64, pubsub.ValidationResult, error) {
-	valCount, err := helpers.ActiveValidatorCount(ctx, bs, slots.ToEpoch(a.Data.Slot))
-	if err != nil {
-		return 0, pubsub.ValidationIgnore, err
-	}
-	count := helpers.SlotCommitteeCount(valCount)
-	if uint64(a.Data.CommitteeIndex) > count {
-		return 0, pubsub.ValidationReject, errors.Errorf("committee index %d > %d", a.Data.CommitteeIndex, count)
-	}
-	return valCount, pubsub.ValidationAccept, nil
-}
-
 // This validates beacon unaggregated attestation using the given state, the validation consists of bitfield length and count consistency
 // and signature verification.
 func (s *Service) validateUnaggregatedAttWithState(ctx context.Context, a *eth.Attestation, bs state.ReadOnlyBeaconState) (pubsub.ValidationResult, error) {
 	ctx, span := trace.StartSpan(ctx, "sync.validateUnaggregatedAttWithState")
 	defer span.End()
 
-	committee, result, err := s.validateBitLength(ctx, a, bs)
-	if result != pubsub.ValidationAccept {
-		return result, err
+	committee, err := helpers.BeaconCommitteeFromState(ctx, bs, a.Data.Slot, a.Data.CommitteeIndex)
+	if err != nil {
+		tracing.AnnotateError(span, err)
+		return pubsub.ValidationIgnore, err
+	}
+
+	// Verify number of aggregation bits matches the committee size.
+	if err := helpers.VerifyBitfieldLength(a.AggregationBits, uint64(len(committee))); err != nil {
+		return pubsub.ValidationReject, err
 	}
 
 	// Attestation must be unaggregated and the bit index must exist in the range of committee indices.
@@ -232,22 +230,8 @@ func (s *Service) validateUnaggregatedAttWithState(ctx context.Context, a *eth.A
 	return s.validateWithBatchVerifier(ctx, "attestation", set)
 }
 
-func (s *Service) validateBitLength(ctx context.Context, a *eth.Attestation, bs state.ReadOnlyBeaconState) ([]primitives.ValidatorIndex, pubsub.ValidationResult, error) {
-	committee, err := helpers.BeaconCommitteeFromState(ctx, bs, a.Data.Slot, a.Data.CommitteeIndex)
-	if err != nil {
-		return nil, pubsub.ValidationIgnore, err
-	}
-
-	// Verify number of aggregation bits matches the committee size.
-	if err := helpers.VerifyBitfieldLength(a.AggregationBits, uint64(len(committee))); err != nil {
-		return nil, pubsub.ValidationReject, err
-	}
-
-	return committee, pubsub.ValidationAccept, nil
-}
-
 // Returns true if the attestation was already seen for the participating validator for the slot.
-func (s *Service) hasSeenCommitteeIndicesSlot(slot primitives.Slot, committeeID primitives.CommitteeIndex, aggregateBits []byte) bool {
+func (s *Service) hasSeenCommitteeIndicesSlot(slot types.Slot, committeeID types.CommitteeIndex, aggregateBits []byte) bool {
 	s.seenUnAggregatedAttestationLock.RLock()
 	defer s.seenUnAggregatedAttestationLock.RUnlock()
 	b := append(bytesutil.Bytes32(uint64(slot)), bytesutil.Bytes32(uint64(committeeID))...)
@@ -257,7 +241,7 @@ func (s *Service) hasSeenCommitteeIndicesSlot(slot primitives.Slot, committeeID 
 }
 
 // Set committee's indices and slot as seen for incoming attestations.
-func (s *Service) setSeenCommitteeIndicesSlot(slot primitives.Slot, committeeID primitives.CommitteeIndex, aggregateBits []byte) {
+func (s *Service) setSeenCommitteeIndicesSlot(slot types.Slot, committeeID types.CommitteeIndex, aggregateBits []byte) {
 	s.seenUnAggregatedAttestationLock.Lock()
 	defer s.seenUnAggregatedAttestationLock.Unlock()
 	b := append(bytesutil.Bytes32(uint64(slot)), bytesutil.Bytes32(uint64(committeeID))...)

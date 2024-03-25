@@ -6,13 +6,11 @@ go_library(
         "enums.go",
         "v1alpha1_to_v1.go",
         "v1alpha1_to_v2.go",
-        "v2_to_v1alpha1.go",
     ],
-    importpath = "github.com/prysmaticlabs/prysm/v5/proto/migration",
+    importpath = "github.com/prysmaticlabs/prysm/v3/proto/migration",
     visibility = ["//visibility:public"],
     deps = [
         "//beacon-chain/state:go_default_library",
-        "//config/fieldparams:go_default_library",
         "//consensus-types/interfaces:go_default_library",
         "//encoding/bytesutil:go_default_library",
         "//encoding/ssz:go_default_library",
@@ -31,7 +29,6 @@ go_test(
         "enums_test.go",
         "v1alpha1_to_v1_test.go",
         "v1alpha1_to_v2_test.go",
-        "v2_to_v1alpha1_test.go",
     ],
     embed = [":go_default_library"],
     deps = [

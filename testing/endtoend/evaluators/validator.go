@@ -2,33 +2,30 @@ package evaluators
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"strconv"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/api/server/structs"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/altair"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/network/httputil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
-	e2eparams "github.com/prysmaticlabs/prysm/v5/testing/endtoend/params"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/policies"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/types"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/altair"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
+	ethtypes "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpbservice "github.com/prysmaticlabs/prysm/v3/proto/eth/service"
+	"github.com/prysmaticlabs/prysm/v3/proto/eth/v2"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/helpers"
+	e2eparams "github.com/prysmaticlabs/prysm/v3/testing/endtoend/params"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/policies"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/types"
+
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var expectedParticipation = 0.99
 
-var expectedMulticlientParticipation = 0.95
+var expectedMulticlientParticipation = 0.98
 
 var expectedSyncParticipation = 0.99
 
@@ -40,7 +37,7 @@ var ValidatorsAreActive = types.Evaluator{
 }
 
 // ValidatorsParticipatingAtEpoch ensures the expected amount of validators are participating.
-var ValidatorsParticipatingAtEpoch = func(epoch primitives.Epoch) types.Evaluator {
+var ValidatorsParticipatingAtEpoch = func(epoch ethtypes.Epoch) types.Evaluator {
 	return types.Evaluator{
 		Name:       "validators_participating_epoch_%d",
 		Policy:     policies.AfterNthEpoch(epoch),
@@ -51,15 +48,12 @@ var ValidatorsParticipatingAtEpoch = func(epoch primitives.Epoch) types.Evaluato
 // ValidatorSyncParticipation ensures the expected amount of sync committee participants
 // are active.
 var ValidatorSyncParticipation = types.Evaluator{
-	Name: "validator_sync_participation_%d",
-	Policy: func(e primitives.Epoch) bool {
-		fEpoch := params.BeaconConfig().AltairForkEpoch
-		return policies.OnwardsNthEpoch(fEpoch)(e)
-	},
+	Name:       "validator_sync_participation_%d",
+	Policy:     policies.AfterNthEpoch(helpers.AltairE2EForkEpoch - 1),
 	Evaluation: validatorsSyncParticipation,
 }
 
-func validatorsAreActive(ec *types.EvaluationContext, conns ...*grpc.ClientConn) error {
+func validatorsAreActive(conns ...*grpc.ClientConn) error {
 	conn := conns[0]
 	client := ethpb.NewBeaconChainClient(conn)
 	// Balances actually fluctuate but we just want to check initial balance.
@@ -75,14 +69,14 @@ func validatorsAreActive(ec *types.EvaluationContext, conns ...*grpc.ClientConn)
 	expectedCount := params.BeaconConfig().MinGenesisActiveValidatorCount
 	receivedCount := uint64(len(validators.ValidatorList))
 	if expectedCount != receivedCount {
-		return fmt.Errorf("expected validator count to be %d, received %d", expectedCount, receivedCount)
+		return fmt.Errorf("expected validator count to be %d, recevied %d", expectedCount, receivedCount)
 	}
 
 	effBalanceLowCount := 0
 	exitEpochWrongCount := 0
 	withdrawEpochWrongCount := 0
 	for _, item := range validators.ValidatorList {
-		if ec.ExitedVals[bytesutil.ToBytes48(item.Validator.PublicKey)] {
+		if valExited && item.Index == exitedIndex {
 			continue
 		}
 		if item.Validator.EffectiveBalance < params.BeaconConfig().MaxEffectiveBalance {
@@ -112,9 +106,10 @@ func validatorsAreActive(ec *types.EvaluationContext, conns ...*grpc.ClientConn)
 }
 
 // validatorsParticipating ensures the validators have an acceptable participation rate.
-func validatorsParticipating(_ *types.EvaluationContext, conns ...*grpc.ClientConn) error {
+func validatorsParticipating(conns ...*grpc.ClientConn) error {
 	conn := conns[0]
 	client := ethpb.NewBeaconChainClient(conn)
+	debugClient := ethpbservice.NewBeaconDebugClient(conn)
 	validatorRequest := &ethpb.GetValidatorParticipationRequest{}
 	participation, err := client.GetValidatorParticipation(context.Background(), validatorRequest)
 	if err != nil {
@@ -126,69 +121,36 @@ func validatorsParticipating(_ *types.EvaluationContext, conns ...*grpc.ClientCo
 	if e2eparams.TestParams.LighthouseBeaconNodeCount != 0 {
 		expected = float32(expectedMulticlientParticipation)
 	}
-	if participation.Epoch > 0 && participation.Epoch.Sub(1) == params.BeaconConfig().BellatrixForkEpoch {
+	if participation.Epoch > 0 && participation.Epoch.Sub(1) == helpers.BellatrixE2EForkEpoch {
 		// Reduce Participation requirement to 95% to account for longer EE calls for
 		// the merge block. Target and head will likely be missed for a few validators at
 		// slot 0.
 		expected = 0.95
 	}
 	if partRate < expected {
-		path := fmt.Sprintf("http://localhost:%d/eth/v2/debug/beacon/states/head", e2eparams.TestParams.Ports.PrysmBeaconNodeGatewayPort)
-		resp := structs.GetBeaconStateV2Response{}
-		httpResp, err := http.Get(path) // #nosec G107 -- path can't be constant because it depends on port param
+		st, err := debugClient.GetBeaconStateV2(context.Background(), &eth.BeaconStateRequestV2{StateId: []byte("head")})
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to get beacon state")
 		}
-		if httpResp.StatusCode != http.StatusOK {
-			e := httputil.DefaultJsonError{}
-			if err = json.NewDecoder(httpResp.Body).Decode(&e); err != nil {
-				return err
-			}
-			return fmt.Errorf("%s (status code %d)", e.Message, e.Code)
-		}
-		if err = json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
-			return err
-		}
-
-		var respPrevEpochParticipation []string
-		switch resp.Version {
-		case version.String(version.Phase0):
+		var missSrcVals []uint64
+		var missTgtVals []uint64
+		var missHeadVals []uint64
+		switch obj := st.Data.State.(type) {
+		case *eth.BeaconStateContainer_Phase0State:
 		// Do Nothing
-		case version.String(version.Altair):
-			st := &structs.BeaconStateAltair{}
-			if err = json.Unmarshal(resp.Data, st); err != nil {
-				return err
-			}
-			respPrevEpochParticipation = st.PreviousEpochParticipation
-		case version.String(version.Bellatrix):
-			st := &structs.BeaconStateBellatrix{}
-			if err = json.Unmarshal(resp.Data, st); err != nil {
-				return err
-			}
-			respPrevEpochParticipation = st.PreviousEpochParticipation
-		case version.String(version.Capella):
-			st := &structs.BeaconStateCapella{}
-			if err = json.Unmarshal(resp.Data, st); err != nil {
-				return err
-			}
-			respPrevEpochParticipation = st.PreviousEpochParticipation
-		default:
-			return fmt.Errorf("unrecognized version %s", resp.Version)
-		}
-
-		prevEpochParticipation := make([]byte, len(respPrevEpochParticipation))
-		for i, p := range respPrevEpochParticipation {
-			n, err := strconv.ParseUint(p, 10, 64)
+		case *eth.BeaconStateContainer_AltairState:
+			missSrcVals, missTgtVals, missHeadVals, err = findMissingValidators(obj.AltairState.PreviousEpochParticipation)
 			if err != nil {
-				return err
+				return errors.Wrap(err, "failed to get missing validators")
 			}
-			prevEpochParticipation[i] = byte(n)
+		case *eth.BeaconStateContainer_BellatrixState:
+			missSrcVals, missTgtVals, missHeadVals, err = findMissingValidators(obj.BellatrixState.PreviousEpochParticipation)
+			if err != nil {
+				return errors.Wrap(err, "failed to get missing validators")
+			}
+		default:
+			return fmt.Errorf("unrecognized version: %v", st.Version)
 		}
-		missSrcVals, missTgtVals, missHeadVals, err := findMissingValidators(prevEpochParticipation)
-		if err != nil {
-			return errors.Wrap(err, "failed to get missing validators")
-		}
-
 		return fmt.Errorf(
 			"validator participation was below for epoch %d, expected %f, received: %f."+
 				" Missing Source,Target and Head validators are %v, %v, %v",
@@ -205,7 +167,7 @@ func validatorsParticipating(_ *types.EvaluationContext, conns ...*grpc.ClientCo
 
 // validatorsSyncParticipation ensures the validators have an acceptable participation rate for
 // sync committee assignments.
-func validatorsSyncParticipation(_ *types.EvaluationContext, conns ...*grpc.ClientConn) error {
+func validatorsSyncParticipation(conns ...*grpc.ClientConn) error {
 	conn := conns[0]
 	client := ethpb.NewNodeClient(conn)
 	altairClient := ethpb.NewBeaconChainClient(conn)
@@ -215,13 +177,10 @@ func validatorsSyncParticipation(_ *types.EvaluationContext, conns ...*grpc.Clie
 	}
 	currSlot := slots.CurrentSlot(uint64(genesis.GenesisTime.AsTime().Unix()))
 	currEpoch := slots.ToEpoch(currSlot)
-	lowestBound := primitives.Epoch(0)
-	if currEpoch >= 1 {
-		lowestBound = currEpoch - 1
-	}
+	lowestBound := currEpoch - 1
 
-	if lowestBound < params.BeaconConfig().AltairForkEpoch {
-		lowestBound = params.BeaconConfig().AltairForkEpoch
+	if lowestBound < helpers.AltairE2EForkEpoch {
+		lowestBound = helpers.AltairE2EForkEpoch
 	}
 	blockCtrs, err := altairClient.ListBeaconBlocks(context.Background(), &ethpb.ListBlocksRequest{QueryFilter: &ethpb.ListBlocksRequest_Epoch{Epoch: lowestBound}})
 	if err != nil {
@@ -236,7 +195,7 @@ func validatorsSyncParticipation(_ *types.EvaluationContext, conns ...*grpc.Clie
 		if b.IsNil() {
 			return errors.New("nil block provided")
 		}
-		forkStartSlot, err := slots.EpochStart(params.BeaconConfig().AltairForkEpoch)
+		forkStartSlot, err := slots.EpochStart(helpers.AltairE2EForkEpoch)
 		if err != nil {
 			return err
 		}
@@ -246,7 +205,7 @@ func validatorsSyncParticipation(_ *types.EvaluationContext, conns ...*grpc.Clie
 		}
 		expectedParticipation := expectedSyncParticipation
 		switch slots.ToEpoch(b.Block().Slot()) {
-		case params.BeaconConfig().AltairForkEpoch:
+		case helpers.AltairE2EForkEpoch:
 			// Drop expected sync participation figure.
 			expectedParticipation = 0.90
 		default:
@@ -277,11 +236,11 @@ func validatorsSyncParticipation(_ *types.EvaluationContext, conns ...*grpc.Clie
 		if b.IsNil() {
 			return errors.New("nil block provided")
 		}
-		forkSlot, err := slots.EpochStart(params.BeaconConfig().AltairForkEpoch)
+		forkSlot, err := slots.EpochStart(helpers.AltairE2EForkEpoch)
 		if err != nil {
 			return err
 		}
-		nexForkSlot, err := slots.EpochStart(params.BeaconConfig().BellatrixForkEpoch)
+		nexForkSlot, err := slots.EpochStart(helpers.BellatrixE2EForkEpoch)
 		if err != nil {
 			return err
 		}
@@ -304,7 +263,7 @@ func validatorsSyncParticipation(_ *types.EvaluationContext, conns ...*grpc.Clie
 	return nil
 }
 
-func syncCompatibleBlockFromCtr(container *ethpb.BeaconBlockContainer) (interfaces.ReadOnlySignedBeaconBlock, error) {
+func syncCompatibleBlockFromCtr(container *ethpb.BeaconBlockContainer) (interfaces.SignedBeaconBlock, error) {
 	if container.GetPhase0Block() != nil {
 		return nil, errors.New("block doesn't support sync committees")
 	}
@@ -316,18 +275,6 @@ func syncCompatibleBlockFromCtr(container *ethpb.BeaconBlockContainer) (interfac
 	}
 	if container.GetBlindedBellatrixBlock() != nil {
 		return blocks.NewSignedBeaconBlock(container.GetBlindedBellatrixBlock())
-	}
-	if container.GetCapellaBlock() != nil {
-		return blocks.NewSignedBeaconBlock(container.GetCapellaBlock())
-	}
-	if container.GetBlindedCapellaBlock() != nil {
-		return blocks.NewSignedBeaconBlock(container.GetBlindedCapellaBlock())
-	}
-	if container.GetDenebBlock() != nil {
-		return blocks.NewSignedBeaconBlock(container.GetDenebBlock())
-	}
-	if container.GetBlindedDenebBlock() != nil {
-		return blocks.NewSignedBeaconBlock(container.GetBlindedDenebBlock())
 	}
 	return nil, errors.New("no supported block type in container")
 }

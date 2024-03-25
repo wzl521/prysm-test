@@ -8,37 +8,31 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/p2p/enr"
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	gcache "github.com/patrickmn/go-cache"
-	mock "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	dbtest "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/execution"
-	doublylinkedtree "github.com/prysmaticlabs/prysm/v5/beacon-chain/forkchoice/doubly-linked-tree"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers"
-	p2ptest "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/testing"
-	p2ptypes "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/types"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stategen"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/rand"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
-	logTest "github.com/sirupsen/logrus/hooks/test"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	dbtest "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/execution"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/peers"
+	p2ptest "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/testing"
+	p2ptypes "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/types"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stategen"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/rand"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
-//	/- b1 - b2
-//
+//    /- b1 - b2
 // b0
-//
-//	\- b3
-//
+//    \- b3
 // Test b1 was missing then received and we can process b0 -> b1 -> b2
 func TestRegularSyncBeaconBlockSubscriber_ProcessPendingBlocks1(t *testing.T) {
 	db := dbtest.SetupDB(t)
@@ -53,8 +47,7 @@ func TestRegularSyncBeaconBlockSubscriber_ProcessPendingBlocks1(t *testing.T) {
 					Epoch: 0,
 				},
 			},
-			clock:    startup.NewClock(time.Unix(0, 0), [32]byte{}),
-			stateGen: stategen.New(db, doublylinkedtree.New()),
+			stateGen: stategen.New(db),
 		},
 		slotToPendingBlocks: gcache.New(time.Second, 2*time.Second),
 		seenPendingBlocks:   make(map[[32]byte]bool),
@@ -108,7 +101,7 @@ func TestRegularSyncBeaconBlockSubscriber_ProcessPendingBlocks1(t *testing.T) {
 	require.NoError(t, r.processPendingBlocks(context.Background())) // Marks a block as bad
 	require.NoError(t, r.processPendingBlocks(context.Background())) // Bad block removed on second run
 
-	assert.Equal(t, 2, len(r.slotToPendingBlocks.Items()), "Incorrect size for slot to pending blocks cache")
+	assert.Equal(t, 1, len(r.slotToPendingBlocks.Items()), "Incorrect size for slot to pending blocks cache")
 	assert.Equal(t, 2, len(r.seenPendingBlocks), "Incorrect size for seen pending block")
 }
 
@@ -126,8 +119,7 @@ func TestRegularSyncBeaconBlockSubscriber_OptimisticStatus(t *testing.T) {
 					Epoch: 0,
 				},
 			},
-			clock:    startup.NewClock(time.Unix(0, 0), [32]byte{}),
-			stateGen: stategen.New(db, doublylinkedtree.New()),
+			stateGen: stategen.New(db),
 		},
 		slotToPendingBlocks: gcache.New(time.Second, 2*time.Second),
 		seenPendingBlocks:   make(map[[32]byte]bool),
@@ -181,7 +173,7 @@ func TestRegularSyncBeaconBlockSubscriber_OptimisticStatus(t *testing.T) {
 	require.NoError(t, r.processPendingBlocks(context.Background())) // Marks a block as bad
 	require.NoError(t, r.processPendingBlocks(context.Background())) // Bad block removed on second run
 
-	assert.Equal(t, 2, len(r.slotToPendingBlocks.Items()), "Incorrect size for slot to pending blocks cache")
+	assert.Equal(t, 1, len(r.slotToPendingBlocks.Items()), "Incorrect size for slot to pending blocks cache")
 	assert.Equal(t, 2, len(r.seenPendingBlocks), "Incorrect size for seen pending block")
 }
 
@@ -189,7 +181,6 @@ func TestRegularSyncBeaconBlockSubscriber_ExecutionEngineTimesOut(t *testing.T) 
 	db := dbtest.SetupDB(t)
 
 	p1 := p2ptest.NewTestP2P(t)
-	fcs := doublylinkedtree.New()
 	r := &Service{
 		cfg: &config{
 			p2p:      p1,
@@ -200,8 +191,7 @@ func TestRegularSyncBeaconBlockSubscriber_ExecutionEngineTimesOut(t *testing.T) 
 				},
 				ReceiveBlockMockErr: execution.ErrHTTPTimeout,
 			},
-			clock:    startup.NewClock(time.Unix(0, 0), [32]byte{}),
-			stateGen: stategen.New(db, fcs),
+			stateGen: stategen.New(db),
 		},
 		slotToPendingBlocks: gcache.New(time.Second, 2*time.Second),
 		seenPendingBlocks:   make(map[[32]byte]bool),
@@ -255,9 +245,9 @@ func TestRegularSyncBeaconBlockSubscriber_ExecutionEngineTimesOut(t *testing.T) 
 	require.NoError(t, r.processPendingBlocks(context.Background())) // Marks a block as bad
 	require.NoError(t, r.processPendingBlocks(context.Background())) // Bad block removed on second run
 
-	assert.Equal(t, 2, len(r.slotToPendingBlocks.Items()), "Incorrect size for slot to pending blocks cache")
+	assert.Equal(t, 1, len(r.slotToPendingBlocks.Items()), "Incorrect size for slot to pending blocks cache")
 	assert.Equal(t, 2, len(r.seenPendingBlocks), "Incorrect size for seen pending block")
-	require.Equal(t, 0, len(r.badBlockCache.Keys())) // Account for the bad block above
+	require.Equal(t, 1, len(r.badBlockCache.Keys())) // Account for the bad block above
 	require.Equal(t, 0, len(r.seenBlockCache.Keys()))
 }
 
@@ -328,8 +318,7 @@ func TestRegularSyncBeaconBlockSubscriber_DoNotReprocessBlock(t *testing.T) {
 					Epoch: 0,
 				},
 			},
-			clock:    startup.NewClock(time.Unix(0, 0), [32]byte{}),
-			stateGen: stategen.New(db, doublylinkedtree.New()),
+			stateGen: stategen.New(db),
 		},
 		slotToPendingBlocks: gcache.New(time.Second, 2*time.Second),
 		seenPendingBlocks:   make(map[[32]byte]bool),
@@ -358,12 +347,9 @@ func TestRegularSyncBeaconBlockSubscriber_DoNotReprocessBlock(t *testing.T) {
 	assert.Equal(t, 0, len(r.seenPendingBlocks), "Incorrect size for seen pending block")
 }
 
-//	/- b1 - b2 - b5
-//
+//    /- b1 - b2 - b5
 // b0
-//
-//	\- b3 - b4
-//
+//    \- b3 - b4
 // Test b2 and b3 were missed, after receiving them we can process 2 chains.
 func TestRegularSyncBeaconBlockSubscriber_ProcessPendingBlocks_2Chains(t *testing.T) {
 	db := dbtest.SetupDB(t)
@@ -397,8 +383,7 @@ func TestRegularSyncBeaconBlockSubscriber_ProcessPendingBlocks_2Chains(t *testin
 					Root:  make([]byte, 32),
 				},
 			},
-			clock:    startup.NewClock(time.Unix(0, 0), [32]byte{}),
-			stateGen: stategen.New(db, doublylinkedtree.New()),
+			stateGen: stategen.New(db),
 		},
 		slotToPendingBlocks: gcache.New(time.Second, 2*time.Second),
 		seenPendingBlocks:   make(map[[32]byte]bool),
@@ -464,8 +449,8 @@ func TestRegularSyncBeaconBlockSubscriber_ProcessPendingBlocks_2Chains(t *testin
 	require.NoError(t, r.processPendingBlocks(context.Background())) // Marks a block as bad
 	require.NoError(t, r.processPendingBlocks(context.Background())) // Bad block removed on second run
 
-	assert.Equal(t, 2, len(r.slotToPendingBlocks.Items()), "Incorrect size for slot to pending blocks cache")
-	assert.Equal(t, 2, len(r.seenPendingBlocks), "Incorrect size for seen pending block")
+	assert.Equal(t, 1, len(r.slotToPendingBlocks.Items()), "Incorrect size for slot to pending blocks cache")
+	assert.Equal(t, 1, len(r.seenPendingBlocks), "Incorrect size for seen pending block")
 
 	// Add b2 to the cache
 	wsb, err = blocks.NewSignedBeaconBlock(b2)
@@ -477,8 +462,8 @@ func TestRegularSyncBeaconBlockSubscriber_ProcessPendingBlocks_2Chains(t *testin
 	require.NoError(t, r.processPendingBlocks(context.Background())) // Marks a block as bad
 	require.NoError(t, r.processPendingBlocks(context.Background())) // Bad block removed on second run
 
-	assert.Equal(t, 2, len(r.slotToPendingBlocks.Items()), "Incorrect size for slot to pending blocks cache")
-	assert.Equal(t, 2, len(r.seenPendingBlocks), "Incorrect size for seen pending block")
+	assert.Equal(t, 0, len(r.slotToPendingBlocks.Items()), "Incorrect size for slot to pending blocks cache")
+	assert.Equal(t, 0, len(r.seenPendingBlocks), "Incorrect size for seen pending block")
 }
 
 func TestRegularSyncBeaconBlockSubscriber_PruneOldPendingBlocks(t *testing.T) {
@@ -565,7 +550,7 @@ func TestService_sortedPendingSlots(t *testing.T) {
 		seenPendingBlocks:   make(map[[32]byte]bool),
 	}
 
-	var lastSlot primitives.Slot = math.MaxUint64
+	var lastSlot types.Slot = math.MaxUint64
 	wsb, err := blocks.NewSignedBeaconBlock(util.HydrateSignedBeaconBlock(&ethpb.SignedBeaconBlock{Block: &ethpb.BeaconBlock{Slot: lastSlot}}))
 	require.NoError(t, err)
 	require.NoError(t, r.insertBlockToPendingQueue(lastSlot, wsb, [32]byte{1}))
@@ -579,7 +564,7 @@ func TestService_sortedPendingSlots(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, r.insertBlockToPendingQueue(lastSlot-2, wsb, [32]byte{4}))
 
-	want := []primitives.Slot{lastSlot - 5, lastSlot - 3, lastSlot - 2, lastSlot}
+	want := []types.Slot{lastSlot - 5, lastSlot - 3, lastSlot - 2, lastSlot}
 	assert.DeepEqual(t, want, r.sortedPendingSlots(), "Unexpected pending slots list")
 }
 
@@ -590,20 +575,18 @@ func TestService_BatchRootRequest(t *testing.T) {
 	p1.Connect(p2)
 	assert.Equal(t, 1, len(p1.BHost.Network().Peers()), "Expected peers to be connected")
 
-	chain := &mock.ChainService{
-		FinalizedCheckPoint: &ethpb.Checkpoint{
-			Epoch: 1,
-			Root:  make([]byte, 32),
-		},
-		ValidatorsRoot: [32]byte{},
-		Genesis:        time.Now(),
-	}
 	r := &Service{
 		cfg: &config{
 			p2p:      p1,
 			beaconDB: db,
-			chain:    chain,
-			clock:    startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
+			chain: &mock.ChainService{
+				FinalizedCheckPoint: &ethpb.Checkpoint{
+					Epoch: 1,
+					Root:  make([]byte, 32),
+				},
+				ValidatorsRoot: [32]byte{},
+				Genesis:        time.Now(),
+			},
 		},
 		slotToPendingBlocks: gcache.New(time.Second, 2*time.Second),
 		seenPendingBlocks:   make(map[[32]byte]bool),
@@ -711,9 +694,7 @@ func TestService_ProcessPendingBlockOnCorrectSlot(t *testing.T) {
 	db := dbtest.SetupDB(t)
 
 	p1 := p2ptest.NewTestP2P(t)
-	fcs := doublylinkedtree.New()
-	mockChain := mock.ChainService{
-		Genesis: time.Unix(time.Now().Unix()-int64(params.BeaconConfig().SecondsPerSlot), 0),
+	mockChain := mock.ChainService{Genesis: time.Unix(time.Now().Unix()-int64(params.BeaconConfig().SecondsPerSlot), 0),
 		FinalizedCheckPoint: &ethpb.Checkpoint{
 			Epoch: 0,
 		}}
@@ -722,8 +703,7 @@ func TestService_ProcessPendingBlockOnCorrectSlot(t *testing.T) {
 			p2p:      p1,
 			beaconDB: db,
 			chain:    &mockChain,
-			clock:    startup.NewClock(mockChain.Genesis, mockChain.ValidatorsRoot),
-			stateGen: stategen.New(db, fcs),
+			stateGen: stategen.New(db),
 		},
 		slotToPendingBlocks: gcache.New(time.Second, 2*time.Second),
 		seenPendingBlocks:   make(map[[32]byte]bool),
@@ -801,7 +781,7 @@ func TestService_ProcessBadPendingBlocks(t *testing.T) {
 			p2p:      p1,
 			beaconDB: db,
 			chain:    &mockChain,
-			stateGen: stategen.New(db, doublylinkedtree.New()),
+			stateGen: stategen.New(db),
 		},
 		slotToPendingBlocks: gcache.New(time.Second, 2*time.Second),
 		seenPendingBlocks:   make(map[[32]byte]bool),
@@ -846,99 +826,4 @@ func TestService_ProcessBadPendingBlocks(t *testing.T) {
 	assert.NoError(t, err)
 	// remove with a different block from the same slot.
 	require.NoError(t, r.deleteBlockFromPendingQueue(b.Block.Slot, bB, b1Root))
-}
-
-func TestAlreadySyncingBlock(t *testing.T) {
-	ctx := context.Background()
-	db := dbtest.SetupDB(t)
-	hook := logTest.NewGlobal()
-
-	mockChain := &mock.ChainService{
-		FinalizedCheckPoint: &ethpb.Checkpoint{
-			Epoch: 0,
-		},
-	}
-
-	p1 := p2ptest.NewTestP2P(t)
-	r := &Service{
-		cfg: &config{
-			p2p:      p1,
-			beaconDB: db,
-			chain:    mockChain,
-			clock:    startup.NewClock(time.Unix(0, 0), [32]byte{}),
-			stateGen: stategen.New(db, doublylinkedtree.New()),
-		},
-		slotToPendingBlocks: gcache.New(time.Second, 2*time.Second),
-		seenPendingBlocks:   make(map[[32]byte]bool),
-	}
-	r.initCaches()
-
-	b := util.NewBeaconBlock()
-	b.Block.Slot = 2
-	bRoot, err := b.Block.HashTreeRoot()
-	require.NoError(t, err)
-	wsb, err := blocks.NewSignedBeaconBlock(b)
-	require.NoError(t, err)
-	require.NoError(t, r.insertBlockToPendingQueue(b.Block.Slot, wsb, bRoot))
-	mockChain.SyncingRoot = bRoot
-	require.NoError(t, r.processPendingBlocks(ctx))
-	require.LogsContain(t, hook, "Skipping pending block already being processed")
-}
-
-func TestExpirationCache_PruneOldBlocksCorrectly(t *testing.T) {
-	ctx := context.Background()
-	db := dbtest.SetupDB(t)
-
-	mockChain := &mock.ChainService{
-		FinalizedCheckPoint: &ethpb.Checkpoint{
-			Epoch: 0,
-		},
-	}
-
-	p1 := p2ptest.NewTestP2P(t)
-	// Reset expiration time
-	currExpTime := pendingBlockExpTime
-	defer func() {
-		pendingBlockExpTime = currExpTime
-	}()
-	pendingBlockExpTime = 500 * time.Millisecond
-
-	r := NewService(ctx,
-		WithStateGen(stategen.New(db, doublylinkedtree.New())),
-		WithDatabase(db),
-		WithChainService(mockChain),
-		WithP2P(p1),
-	)
-	b1 := util.NewBeaconBlock()
-	b1.Block.Slot = 1
-	b1.Block.ProposerIndex = 10
-	b1Root, err := b1.Block.HashTreeRoot()
-	require.NoError(t, err)
-	wsb, err := blocks.NewSignedBeaconBlock(b1)
-	require.NoError(t, err)
-	require.NoError(t, r.insertBlockToPendingQueue(1, wsb, b1Root))
-
-	// Add new block with the same slot.
-	b2 := util.NewBeaconBlock()
-	b2.Block.Slot = 1
-	b2.Block.ProposerIndex = 11
-	b2Root, err := b2.Block.HashTreeRoot()
-	require.NoError(t, err)
-	wsb, err = blocks.NewSignedBeaconBlock(b2)
-	require.NoError(t, err)
-	require.NoError(t, r.insertBlockToPendingQueue(1, wsb, b2Root))
-
-	require.Equal(t, true, r.seenPendingBlocks[b1Root])
-	require.Equal(t, true, r.seenPendingBlocks[b2Root])
-	require.Equal(t, 2, len(r.pendingBlocksInCache(1)))
-
-	// Wait for expiration cache to cleanup and remove old block.
-	time.Sleep(2 * pendingBlockExpTime)
-
-	// Run pending queue with expired blocks.
-	require.NoError(t, r.processPendingBlocks(ctx))
-
-	assert.Equal(t, false, r.seenPendingBlocks[b1Root])
-	assert.Equal(t, false, r.seenPendingBlocks[b2Root])
-	assert.Equal(t, 0, len(r.pendingBlocksInCache(1)))
 }

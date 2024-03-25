@@ -1,41 +1,45 @@
 package sync
 
 import (
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
 )
 
 // Specifies the fixed size context length.
 const forkDigestLength = 4
 
 // writes peer's current context for the expected payload to the stream.
-func writeContextToStream(objCtx []byte, stream network.Stream) error {
+func writeContextToStream(objCtx []byte, stream network.Stream, chain blockchain.ForkFetcher) error {
 	// The rpc context for our v2 methods is the fork-digest of
 	// the relevant payload. We write the associated fork-digest(context)
 	// into the stream for the payload.
-	rpcCtx, err := expectRpcContext(stream)
+	rpcCtx, err := rpcContext(stream, chain)
 	if err != nil {
 		return err
 	}
-	// Exit early if an empty context is expected.
-	if !rpcCtx {
+	// Exit early if there is an empty context.
+	if len(rpcCtx) == 0 {
 		return nil
 	}
-	_, err = stream.Write(objCtx)
+	// Always choose the object's context when writing to the stream.
+	if objCtx != nil {
+		rpcCtx = objCtx
+	}
+	_, err = stream.Write(rpcCtx)
 	return err
 }
 
 // reads any attached context-bytes to the payload.
-func readContextFromStream(stream network.Stream) ([]byte, error) {
-	hasCtx, err := expectRpcContext(stream)
+func readContextFromStream(stream network.Stream, chain blockchain.ForkFetcher) ([]byte, error) {
+	rpcCtx, err := rpcContext(stream, chain)
 	if err != nil {
 		return nil, err
 	}
-	if !hasCtx {
+	if len(rpcCtx) == 0 {
 		return []byte{}, nil
 	}
 	// Read context (fork-digest) from stream
@@ -46,17 +50,27 @@ func readContextFromStream(stream network.Stream) ([]byte, error) {
 	return b, nil
 }
 
-func expectRpcContext(stream network.Stream) (bool, error) {
-	_, message, version, err := p2p.TopicDeconstructor(string(stream.Protocol()))
+// retrieve expected context depending on rpc topic schema version.
+func rpcContext(stream network.Stream, chain blockchain.ForkFetcher) ([]byte, error) {
+	_, _, version, err := p2p.TopicDeconstructor(string(stream.Protocol()))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	// For backwards compatibility, we want to omit context bytes for certain v1 methods that were defined before
-	// context bytes were introduced into the protocol.
-	if version == p2p.SchemaVersionV1 && p2p.OmitContextBytesV1[message] {
-		return false, nil
+	switch version {
+	case p2p.SchemaVersionV1:
+		// Return empty context for a v1 method.
+		return []byte{}, nil
+	case p2p.SchemaVersionV2:
+		currFork := chain.CurrentFork()
+		genRoot := chain.GenesisValidatorsRoot()
+		digest, err := signing.ComputeForkDigest(currFork.CurrentVersion, genRoot[:])
+		if err != nil {
+			return nil, err
+		}
+		return digest[:], nil
+	default:
+		return nil, errors.New("invalid version of %s registered for topic: %s")
 	}
-	return true, nil
 }
 
 // Minimal interface for a stream with a protocol.
@@ -74,23 +88,4 @@ func validateVersion(version string, stream withProtocol) error {
 		return errors.Errorf("stream version of %s doesn't match provided version %s", streamVersion, version)
 	}
 	return nil
-}
-
-// ContextByteVersions is a mapping between expected values for context bytes
-// and the runtime/version identifier they correspond to. This can be used to look up the type
-// needed to unmarshal a wire-encoded value.
-type ContextByteVersions map[[4]byte]int
-
-// ContextByteVersionsForValRoot computes a mapping between all possible context bytes values
-// and the runtime/version identifier for the corresponding fork.
-func ContextByteVersionsForValRoot(valRoot [32]byte) (ContextByteVersions, error) {
-	m := make(ContextByteVersions)
-	for fv, v := range params.ConfigForkVersions(params.BeaconConfig()) {
-		digest, err := signing.ComputeForkDigest(fv[:], valRoot[:])
-		if err != nil {
-			return nil, errors.Wrapf(err, "unable to compute fork digest for fork version %#x", fv)
-		}
-		m[digest] = v
-	}
-	return m, nil
 }

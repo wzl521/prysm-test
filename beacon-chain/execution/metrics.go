@@ -6,6 +6,10 @@ import (
 )
 
 var (
+	totalTerminalDifficulty = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "total_terminal_difficulty",
+		Help: "The total terminal difficulty of the execution chain before merge",
+	})
 	newPayloadLatency = promauto.NewHistogram(
 		prometheus.HistogramOpts{
 			Name:    "new_payload_v1_latency_milliseconds",
@@ -66,9 +70,5 @@ var (
 	reconstructedExecutionPayloadCount = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "reconstructed_execution_payload_count",
 		Help: "Count the number of execution payloads that are reconstructed using JSON-RPC from payload headers",
-	})
-	errRequestTooLargeCount = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "execution_payload_bodies_count",
-		Help: "The number of requested payload bodies is too large",
 	})
 )

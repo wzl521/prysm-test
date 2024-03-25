@@ -4,30 +4,28 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"math"
 	"reflect"
 	"testing"
 	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
-	mock "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed"
-	opfeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/operation"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	coreTime "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/time"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	p2ptest "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	mockSync "github.com/prysmaticlabs/prysm/v5/beacon-chain/sync/initial-sync/testing"
-	lruwrpr "github.com/prysmaticlabs/prysm/v5/cache/lru"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	opfeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/operation"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	coreTime "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/time"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	p2ptest "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
+	mockSync "github.com/prysmaticlabs/prysm/v3/beacon-chain/sync/initial-sync/testing"
+	lruwrpr "github.com/prysmaticlabs/prysm/v3/cache/lru"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func setupValidExit(t *testing.T) (*ethpb.SignedVoluntaryExit, state.BeaconState) {
@@ -43,7 +41,7 @@ func setupValidExit(t *testing.T) (*ethpb.SignedVoluntaryExit, state.BeaconState
 			ActivationEpoch: 0,
 		},
 	}
-	st, err := state_native.InitializeFromProtoPhase0(&ethpb.BeaconState{
+	st, err := v1.InitializeFromProto(&ethpb.BeaconState{
 		Validators: registry,
 		Fork: &ethpb.Fork{
 			CurrentVersion:  params.BeaconConfig().GenesisForkVersion,
@@ -73,28 +71,20 @@ func setupValidExit(t *testing.T) (*ethpb.SignedVoluntaryExit, state.BeaconState
 }
 
 func TestValidateVoluntaryExit_ValidExit(t *testing.T) {
-	cfg := params.BeaconConfig().Copy()
-	cfg.DenebForkEpoch = math.MaxUint64
-	params.OverrideBeaconConfig(cfg)
-	params.SetupTestConfigCleanup(t)
-
 	p := p2ptest.NewTestP2P(t)
 	ctx := context.Background()
 
 	exit, s := setupValidExit(t)
 
-	gt := time.Now()
-	mockChainService := &mock.ChainService{
-		State:   s,
-		Genesis: gt,
-	}
 	r := &Service{
 		cfg: &config{
-			p2p:               p,
-			chain:             mockChainService,
-			clock:             startup.NewClock(gt, [32]byte{}),
+			p2p: p,
+			chain: &mock.ChainService{
+				State:   s,
+				Genesis: time.Now(),
+			},
 			initialSync:       &mockSync.Sync{IsSyncing: false},
-			operationNotifier: mockChainService.OperationNotifier(),
+			operationNotifier: (&mock.ChainService{}).OperationNotifier(),
 		},
 		seenExitCache: lruwrpr.New(10),
 	}
@@ -119,22 +109,25 @@ func TestValidateVoluntaryExit_ValidExit(t *testing.T) {
 	defer opSub.Unsubscribe()
 
 	res, err := r.validateVoluntaryExit(ctx, "", m)
-	require.NoError(t, err)
-	require.Equal(t, pubsub.ValidationAccept, res, "Failed validation")
-	require.NotNil(t, m.ValidatorData, "Decoded message was not set on the message validator data")
+	assert.NoError(t, err)
+	valid := res == pubsub.ValidationAccept
+	assert.Equal(t, true, valid, "Failed validation")
+	assert.NotNil(t, m.ValidatorData, "Decoded message was not set on the message validator data")
 
-	select {
-	case event := <-opChannel:
-		if event.Type == opfeed.ExitReceived {
-			_, ok := event.Data.(*opfeed.ExitReceivedData)
-			assert.Equal(t, true, ok, "Entity is not of type *opfeed.ExitReceivedData")
-		} else {
-			t.Error("Unexpected event type received")
+	// Ensure the state notification was broadcast.
+	notificationFound := false
+	for !notificationFound {
+		select {
+		case event := <-opChannel:
+			if event.Type == opfeed.ExitReceived {
+				notificationFound = true
+				_, ok := event.Data.(*opfeed.ExitReceivedData)
+				assert.Equal(t, true, ok, "Entity is not of type *opfeed.ExitReceivedData")
+			}
+		case <-opSub.Err():
+			t.Error("Subscription to state notifier failed")
+			return
 		}
-	case <-opSub.Err():
-		t.Error("Subscription to state notifier failed")
-	case <-time.After(10 * time.Second): // Timeout to prevent hanging tests
-		t.Error("Timeout waiting for exit notification")
 	}
 }
 

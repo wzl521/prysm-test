@@ -4,20 +4,19 @@ import (
 	"context"
 	"testing"
 
-	testDB "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/testing"
-	doublylinkedtree "github.com/prysmaticlabs/prysm/v5/beacon-chain/forkchoice/doubly-linked-tree"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	testDB "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/testing"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
 func TestResume(t *testing.T) {
 	ctx := context.Background()
 	beaconDB := testDB.SetupDB(t)
 
-	service := New(beaconDB, doublylinkedtree.New())
+	service := New(beaconDB)
 	b := util.NewBeaconBlock()
 	util.SaveBlock(t, ctx, service.beaconDB, b)
 	root, err := b.Block.HashTreeRoot()
@@ -30,7 +29,7 @@ func TestResume(t *testing.T) {
 
 	resumeState, err := service.Resume(ctx, beaconState)
 	require.NoError(t, err)
-	require.DeepSSZEqual(t, beaconState.ToProtoUnsafe(), resumeState.ToProtoUnsafe())
+	require.DeepSSZEqual(t, beaconState.InnerStateUnsafe(), resumeState.InnerStateUnsafe())
 	assert.Equal(t, params.BeaconConfig().SlotsPerEpoch, service.finalizedInfo.slot, "Did not get watned slot")
 	assert.Equal(t, service.finalizedInfo.root, root, "Did not get wanted root")
 	assert.NotNil(t, service.finalizedState(), "Wanted a non nil finalized state")

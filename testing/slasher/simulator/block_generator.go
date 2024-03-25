@@ -3,24 +3,24 @@ package simulator
 import (
 	"context"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/crypto/rand"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/crypto/rand"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 )
 
 func (s *Simulator) generateBlockHeadersForSlot(
-	ctx context.Context, slot primitives.Slot,
+	ctx context.Context, slot types.Slot,
 ) ([]*ethpb.SignedBeaconBlockHeader, []*ethpb.ProposerSlashing, error) {
 	blocks := make([]*ethpb.SignedBeaconBlockHeader, 0)
 	slashings := make([]*ethpb.ProposerSlashing, 0)
 	proposer := rand.NewGenerator().Uint64() % s.srvConfig.Params.NumValidators
 
-	var parentRoot [32]byte
+	parentRoot := [32]byte{}
 	beaconState, err := s.srvConfig.StateGen.StateByRoot(ctx, parentRoot)
 	if err != nil {
 		return nil, nil, err
@@ -28,7 +28,7 @@ func (s *Simulator) generateBlockHeadersForSlot(
 	block := &ethpb.SignedBeaconBlockHeader{
 		Header: &ethpb.BeaconBlockHeader{
 			Slot:          slot,
-			ProposerIndex: primitives.ValidatorIndex(proposer),
+			ProposerIndex: types.ValidatorIndex(proposer),
 			ParentRoot:    bytesutil.PadTo([]byte{}, 32),
 			StateRoot:     bytesutil.PadTo([]byte{}, 32),
 			BodyRoot:      bytesutil.PadTo([]byte("good block"), 32),
@@ -46,7 +46,7 @@ func (s *Simulator) generateBlockHeadersForSlot(
 		slashableBlock := &ethpb.SignedBeaconBlockHeader{
 			Header: &ethpb.BeaconBlockHeader{
 				Slot:          slot,
-				ProposerIndex: primitives.ValidatorIndex(proposer),
+				ProposerIndex: types.ValidatorIndex(proposer),
 				ParentRoot:    bytesutil.PadTo([]byte{}, 32),
 				StateRoot:     bytesutil.PadTo([]byte{}, 32),
 				BodyRoot:      bytesutil.PadTo([]byte("bad block"), 32),

@@ -4,85 +4,15 @@ import (
 	"encoding/hex"
 	"testing"
 
-	ssz "github.com/prysmaticlabs/fastssz"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
-
-func generateBlobIdentifiers(n int) []*eth.BlobIdentifier {
-	r := make([]*eth.BlobIdentifier, n)
-	for i := 0; i < n; i++ {
-		r[i] = &eth.BlobIdentifier{
-			BlockRoot: bytesutil.PadTo([]byte{byte(i)}, 32),
-			Index:     0,
-		}
-	}
-	return r
-}
-
-func TestBlobSidecarsByRootReq_MarshalSSZ(t *testing.T) {
-	cases := []struct {
-		name         string
-		ids          []*eth.BlobIdentifier
-		marshalErr   error
-		unmarshalErr error
-		unmarshalMod func([]byte) []byte
-	}{
-		{
-			name: "empty list",
-		},
-		{
-			name: "single item list",
-			ids:  generateBlobIdentifiers(1),
-		},
-		{
-			name: "10 item list",
-			ids:  generateBlobIdentifiers(10),
-		},
-		{
-			name: "wonky unmarshal size",
-			ids:  generateBlobIdentifiers(10),
-			unmarshalMod: func(in []byte) []byte {
-				in = append(in, byte(0))
-				return in
-			},
-			unmarshalErr: ssz.ErrIncorrectByteSize,
-		},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			r := BlobSidecarsByRootReq(c.ids)
-			by, err := r.MarshalSSZ()
-			if c.marshalErr != nil {
-				require.ErrorIs(t, err, c.marshalErr)
-				return
-			}
-			require.NoError(t, err)
-			if c.unmarshalMod != nil {
-				by = c.unmarshalMod(by)
-			}
-			got := &BlobSidecarsByRootReq{}
-			err = got.UnmarshalSSZ(by)
-			if c.unmarshalErr != nil {
-				require.ErrorIs(t, err, c.unmarshalErr)
-				return
-			}
-			require.NoError(t, err)
-			for i, gid := range *got {
-				require.DeepEqual(t, c.ids[i], gid)
-			}
-		})
-	}
-}
 
 func TestBeaconBlockByRootsReq_Limit(t *testing.T) {
 	fixedRoots := make([][32]byte, 0)
-	for i := uint64(0); i < params.BeaconConfig().MaxRequestBlocks+100; i++ {
+	for i := uint64(0); i < params.BeaconNetworkConfig().MaxRequestBlocks+100; i++ {
 		fixedRoots = append(fixedRoots, [32]byte{byte(i)})
 	}
 	req := BeaconBlockByRootsReq(fixedRoots)
@@ -95,7 +25,7 @@ func TestBeaconBlockByRootsReq_Limit(t *testing.T) {
 		buf = append(buf, rt[:]...)
 	}
 	req2 := BeaconBlockByRootsReq(nil)
-	require.ErrorContains(t, "expected buffer with length of up to", req2.UnmarshalSSZ(buf))
+	require.ErrorContains(t, "expected buffer with length of upto", req2.UnmarshalSSZ(buf))
 }
 
 func TestErrorResponse_Limit(t *testing.T) {
@@ -179,13 +109,13 @@ func TestSSZBytes_HashTreeRoot(t *testing.T) {
 }
 
 func TestGoodbyeCodes(t *testing.T) {
-	assert.Equal(t, primitives.SSZUint64(1), GoodbyeCodeClientShutdown)
-	assert.Equal(t, primitives.SSZUint64(2), GoodbyeCodeWrongNetwork)
-	assert.Equal(t, primitives.SSZUint64(3), GoodbyeCodeGenericError)
-	assert.Equal(t, primitives.SSZUint64(128), GoodbyeCodeUnableToVerifyNetwork)
-	assert.Equal(t, primitives.SSZUint64(129), GoodbyeCodeTooManyPeers)
-	assert.Equal(t, primitives.SSZUint64(250), GoodbyeCodeBadScore)
-	assert.Equal(t, primitives.SSZUint64(251), GoodbyeCodeBanned)
+	assert.Equal(t, types.SSZUint64(1), GoodbyeCodeClientShutdown)
+	assert.Equal(t, types.SSZUint64(2), GoodbyeCodeWrongNetwork)
+	assert.Equal(t, types.SSZUint64(3), GoodbyeCodeGenericError)
+	assert.Equal(t, types.SSZUint64(128), GoodbyeCodeUnableToVerifyNetwork)
+	assert.Equal(t, types.SSZUint64(129), GoodbyeCodeTooManyPeers)
+	assert.Equal(t, types.SSZUint64(250), GoodbyeCodeBadScore)
+	assert.Equal(t, types.SSZUint64(251), GoodbyeCodeBanned)
 
 }
 

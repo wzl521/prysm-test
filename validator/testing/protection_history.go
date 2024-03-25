@@ -3,14 +3,14 @@ package testing
 import (
 	"fmt"
 
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/crypto/rand"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/validator/db/kv"
-	"github.com/prysmaticlabs/prysm/v5/validator/slashing-protection-history/format"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/crypto/rand"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/validator/db/kv"
+	"github.com/prysmaticlabs/prysm/v3/validator/slashing-protection-history/format"
 )
 
 // MockSlashingProtectionJSON creates a mock, full slashing protection JSON struct
@@ -59,7 +59,7 @@ func MockAttestingAndProposalHistories(pubkeys [][fieldparams.BLSPubkeyLength]by
 	proposalData := make([]kv.ProposalHistoryForPubkey, numValidators)
 	gen := rand.NewGenerator()
 	for v := 0; v < numValidators; v++ {
-		latestTarget := primitives.Epoch(gen.Intn(int(params.BeaconConfig().WeakSubjectivityPeriod) / 1000))
+		latestTarget := types.Epoch(gen.Intn(int(params.BeaconConfig().WeakSubjectivityPeriod) / 1000))
 		// If 0, we change the value to 1 as the we compute source by doing (target-1)
 		// to prevent any underflows in this setup helper.
 		if latestTarget == 0 {
@@ -67,23 +67,23 @@ func MockAttestingAndProposalHistories(pubkeys [][fieldparams.BLSPubkeyLength]by
 		}
 		historicalAtts := make([]*kv.AttestationRecord, 0)
 		proposals := make([]kv.Proposal, 0)
-		for i := primitives.Epoch(1); i < latestTarget; i++ {
-			var signingRoot [32]byte
+		for i := types.Epoch(1); i < latestTarget; i++ {
+			signingRoot := [32]byte{}
 			signingRootStr := fmt.Sprintf("%d", i)
 			copy(signingRoot[:], signingRootStr)
 			historicalAtts = append(historicalAtts, &kv.AttestationRecord{
 				Source:      i - 1,
 				Target:      i,
-				SigningRoot: signingRoot[:],
+				SigningRoot: signingRoot,
 				PubKey:      pubkeys[v],
 			})
 		}
-		for i := primitives.Epoch(1); i <= latestTarget; i++ {
-			var signingRoot [32]byte
+		for i := types.Epoch(1); i <= latestTarget; i++ {
+			signingRoot := [32]byte{}
 			signingRootStr := fmt.Sprintf("%d", i)
 			copy(signingRoot[:], signingRootStr)
 			proposals = append(proposals, kv.Proposal{
-				Slot:        primitives.Slot(i),
+				Slot:        types.Slot(i),
 				SigningRoot: signingRoot[:],
 			})
 		}

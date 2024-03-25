@@ -11,12 +11,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	e2e "github.com/prysmaticlabs/prysm/v5/testing/endtoend/params"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/policies"
-	e2etypes "github.com/prysmaticlabs/prysm/v5/testing/endtoend/types"
-	"golang.org/x/sync/errgroup"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	eth "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	e2e "github.com/prysmaticlabs/prysm/v3/testing/endtoend/params"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/policies"
+	e2etypes "github.com/prysmaticlabs/prysm/v3/testing/endtoend/types"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -53,7 +52,7 @@ var AllNodesHaveSameHead = e2etypes.Evaluator{
 	Evaluation: allNodesHaveSameHead,
 }
 
-func healthzCheck(_ *e2etypes.EvaluationContext, conns ...*grpc.ClientConn) error {
+func healthzCheck(conns ...*grpc.ClientConn) error {
 	count := len(conns)
 	for i := 0; i < count; i++ {
 		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/healthz", e2e.TestParams.Ports.PrysmBeaconNodeMetricsPort+i))
@@ -95,7 +94,7 @@ func healthzCheck(_ *e2etypes.EvaluationContext, conns ...*grpc.ClientConn) erro
 	return nil
 }
 
-func peersConnect(_ *e2etypes.EvaluationContext, conns ...*grpc.ClientConn) error {
+func peersConnect(conns ...*grpc.ClientConn) error {
 	if len(conns) == 1 {
 		return nil
 	}
@@ -115,7 +114,7 @@ func peersConnect(_ *e2etypes.EvaluationContext, conns ...*grpc.ClientConn) erro
 	return nil
 }
 
-func finishedSyncing(_ *e2etypes.EvaluationContext, conns ...*grpc.ClientConn) error {
+func finishedSyncing(conns ...*grpc.ClientConn) error {
 	conn := conns[0]
 	syncNodeClient := eth.NewNodeClient(conn)
 	syncStatus, err := syncNodeClient.GetSyncStatus(context.Background(), &emptypb.Empty{})
@@ -128,33 +127,22 @@ func finishedSyncing(_ *e2etypes.EvaluationContext, conns ...*grpc.ClientConn) e
 	return nil
 }
 
-func allNodesHaveSameHead(_ *e2etypes.EvaluationContext, conns ...*grpc.ClientConn) error {
-	headEpochs := make([]primitives.Epoch, len(conns))
+func allNodesHaveSameHead(conns ...*grpc.ClientConn) error {
+	headEpochs := make([]types.Epoch, len(conns))
 	justifiedRoots := make([][]byte, len(conns))
 	prevJustifiedRoots := make([][]byte, len(conns))
 	finalizedRoots := make([][]byte, len(conns))
-	chainHeads := make([]*eth.ChainHead, len(conns))
-	g, _ := errgroup.WithContext(context.Background())
-
 	for i, conn := range conns {
-		conIdx := i
-		currConn := conn
-		g.Go(func() error {
-			beaconClient := eth.NewBeaconChainClient(currConn)
-			chainHead, err := beaconClient.GetChainHead(context.Background(), &emptypb.Empty{})
-			if err != nil {
-				return errors.Wrapf(err, "connection number=%d", conIdx)
-			}
-			headEpochs[conIdx] = chainHead.HeadEpoch
-			justifiedRoots[conIdx] = chainHead.JustifiedBlockRoot
-			prevJustifiedRoots[conIdx] = chainHead.PreviousJustifiedBlockRoot
-			finalizedRoots[conIdx] = chainHead.FinalizedBlockRoot
-			chainHeads[conIdx] = chainHead
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
-		return err
+		beaconClient := eth.NewBeaconChainClient(conn)
+		chainHead, err := beaconClient.GetChainHead(context.Background(), &emptypb.Empty{})
+		if err != nil {
+			return errors.Wrapf(err, "connection number=%d", i)
+		}
+		headEpochs[i] = chainHead.HeadEpoch
+		justifiedRoots[i] = chainHead.JustifiedBlockRoot
+		prevJustifiedRoots[i] = chainHead.PreviousJustifiedBlockRoot
+		finalizedRoots[i] = chainHead.FinalizedBlockRoot
+		time.Sleep(connTimeDelay)
 	}
 
 	for i := 0; i < len(conns); i++ {
@@ -168,12 +156,10 @@ func allNodesHaveSameHead(_ *e2etypes.EvaluationContext, conns ...*grpc.ClientCo
 		}
 		if !bytes.Equal(justifiedRoots[0], justifiedRoots[i]) {
 			return fmt.Errorf(
-				"received conflicting justified block roots on node %d, expected %#x, received %#x: %s and %s",
+				"received conflicting justified block roots on node %d, expected %#x, received %#x",
 				i,
 				justifiedRoots[0],
 				justifiedRoots[i],
-				chainHeads[0].String(),
-				chainHeads[i].String(),
 			)
 		}
 		if !bytes.Equal(prevJustifiedRoots[0], prevJustifiedRoots[i]) {

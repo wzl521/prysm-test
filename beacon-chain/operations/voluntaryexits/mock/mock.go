@@ -1,9 +1,11 @@
 package mock
 
 import (
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"context"
+
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	eth "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 )
 
 // PoolMock is a fake implementation of PoolManager.
@@ -12,17 +14,12 @@ type PoolMock struct {
 }
 
 // PendingExits --
-func (m *PoolMock) PendingExits() ([]*eth.SignedVoluntaryExit, error) {
-	return m.Exits, nil
-}
-
-// ExitsForInclusion --
-func (m *PoolMock) ExitsForInclusion(_ state.ReadOnlyBeaconState, _ primitives.Slot) ([]*eth.SignedVoluntaryExit, error) {
-	return m.Exits, nil
+func (m *PoolMock) PendingExits(_ state.ReadOnlyBeaconState, _ types.Slot, _ bool) []*eth.SignedVoluntaryExit {
+	return m.Exits
 }
 
 // InsertVoluntaryExit --
-func (m *PoolMock) InsertVoluntaryExit(exit *eth.SignedVoluntaryExit) {
+func (m *PoolMock) InsertVoluntaryExit(_ context.Context, _ state.ReadOnlyBeaconState, exit *eth.SignedVoluntaryExit) {
 	m.Exits = append(m.Exits, exit)
 }
 

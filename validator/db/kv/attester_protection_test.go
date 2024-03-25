@@ -7,12 +7,12 @@ import (
 	"sync"
 	"testing"
 
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 	logTest "github.com/sirupsen/logrus/hooks/test"
 	bolt "go.etcd.io/bbolt"
 )
@@ -24,7 +24,7 @@ func TestPendingAttestationRecords_Flush(t *testing.T) {
 	num := 5
 	for i := 0; i < num; i++ {
 		queue.Append(&AttestationRecord{
-			Target: primitives.Epoch(i),
+			Target: types.Epoch(i),
 		})
 	}
 
@@ -100,7 +100,7 @@ func TestStore_CheckSlashableAttestation_DoubleVote(t *testing.T) {
 			slashingKind, err := validatorDB.CheckSlashableAttestation(
 				ctx,
 				pubKeys[0],
-				tt.incomingSigningRoot[:],
+				tt.incomingSigningRoot,
 				tt.incomingAttestation,
 			)
 			if tt.want {
@@ -133,7 +133,7 @@ func TestStore_CheckSlashableAttestation_SurroundVote_MultipleTargetsPerSource(t
 	// our first attestation. Given there can be multiple attested target epochs per
 	// source epoch, we expect our logic to be able to catch this slashable offense.
 	evilAtt := createAttestation(firstAtt.Data.Source.Epoch-1, firstAtt.Data.Target.Epoch+1)
-	slashable, err := validatorDB.CheckSlashableAttestation(ctx, pubKeys[0], []byte{2}, evilAtt)
+	slashable, err := validatorDB.CheckSlashableAttestation(ctx, pubKeys[0], [32]byte{2}, evilAtt)
 	require.NotNil(t, err)
 	assert.Equal(t, SurroundingVote, slashable)
 }
@@ -141,7 +141,7 @@ func TestStore_CheckSlashableAttestation_SurroundVote_MultipleTargetsPerSource(t
 func TestStore_CheckSlashableAttestation_SurroundVote_54kEpochs(t *testing.T) {
 	ctx := context.Background()
 	numValidators := 1
-	numEpochs := primitives.Epoch(54000)
+	numEpochs := types.Epoch(54000)
 	pubKeys := make([][fieldparams.BLSPubkeyLength]byte, numValidators)
 	validatorDB := setupDB(t, pubKeys)
 
@@ -157,7 +157,7 @@ func TestStore_CheckSlashableAttestation_SurroundVote_54kEpochs(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		for epoch := primitives.Epoch(1); epoch < numEpochs; epoch++ {
+		for epoch := types.Epoch(1); epoch < numEpochs; epoch++ {
 			att := createAttestation(epoch-1, epoch)
 			sourceEpoch := bytesutil.EpochToBytesBigEndian(att.Data.Source.Epoch)
 			targetEpoch := bytesutil.EpochToBytesBigEndian(att.Data.Target.Epoch)
@@ -171,31 +171,31 @@ func TestStore_CheckSlashableAttestation_SurroundVote_54kEpochs(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		signingRoot []byte
+		signingRoot [32]byte
 		attestation *ethpb.IndexedAttestation
 		want        SlashingKind
 	}{
 		{
 			name:        "surround vote at half of the weak subjectivity period",
-			signingRoot: []byte{},
+			signingRoot: [32]byte{},
 			attestation: createAttestation(numEpochs/2, numEpochs),
 			want:        SurroundingVote,
 		},
 		{
 			name:        "spanning genesis to weak subjectivity period surround vote",
-			signingRoot: []byte{},
+			signingRoot: [32]byte{},
 			attestation: createAttestation(0, numEpochs),
 			want:        SurroundingVote,
 		},
 		{
 			name:        "simple surround vote at end of weak subjectivity period",
-			signingRoot: []byte{},
+			signingRoot: [32]byte{},
 			attestation: createAttestation(numEpochs-3, numEpochs),
 			want:        SurroundingVote,
 		},
 		{
 			name:        "non-slashable vote",
-			signingRoot: []byte{},
+			signingRoot: [32]byte{},
 			attestation: createAttestation(numEpochs, numEpochs+1),
 			want:        NotSlashable,
 		},
@@ -232,10 +232,10 @@ func TestLowestSignedSourceEpoch_SaveRetrieve(t *testing.T) {
 	)
 	got, _, err := validatorDB.LowestSignedSourceEpoch(ctx, p0)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(100), got)
+	require.Equal(t, types.Epoch(100), got)
 	got, _, err = validatorDB.LowestSignedSourceEpoch(ctx, p1)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(200), got)
+	require.Equal(t, types.Epoch(200), got)
 
 	// Can replace.
 	require.NoError(
@@ -248,10 +248,10 @@ func TestLowestSignedSourceEpoch_SaveRetrieve(t *testing.T) {
 	)
 	got, _, err = validatorDB.LowestSignedSourceEpoch(ctx, p0)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(99), got)
+	require.Equal(t, types.Epoch(99), got)
 	got, _, err = validatorDB.LowestSignedSourceEpoch(ctx, p1)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(199), got)
+	require.Equal(t, types.Epoch(199), got)
 
 	// Can not replace.
 	require.NoError(
@@ -264,10 +264,10 @@ func TestLowestSignedSourceEpoch_SaveRetrieve(t *testing.T) {
 	)
 	got, _, err = validatorDB.LowestSignedSourceEpoch(ctx, p0)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(99), got)
+	require.Equal(t, types.Epoch(99), got)
 	got, _, err = validatorDB.LowestSignedSourceEpoch(ctx, p1)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(199), got)
+	require.Equal(t, types.Epoch(199), got)
 }
 
 func TestLowestSignedTargetEpoch_SaveRetrieveReplace(t *testing.T) {
@@ -291,10 +291,10 @@ func TestLowestSignedTargetEpoch_SaveRetrieveReplace(t *testing.T) {
 	)
 	got, _, err := validatorDB.LowestSignedTargetEpoch(ctx, p0)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(100), got)
+	require.Equal(t, types.Epoch(100), got)
 	got, _, err = validatorDB.LowestSignedTargetEpoch(ctx, p1)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(200), got)
+	require.Equal(t, types.Epoch(200), got)
 
 	// Can replace.
 	require.NoError(
@@ -307,10 +307,10 @@ func TestLowestSignedTargetEpoch_SaveRetrieveReplace(t *testing.T) {
 	)
 	got, _, err = validatorDB.LowestSignedTargetEpoch(ctx, p0)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(99), got)
+	require.Equal(t, types.Epoch(99), got)
 	got, _, err = validatorDB.LowestSignedTargetEpoch(ctx, p1)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(199), got)
+	require.Equal(t, types.Epoch(199), got)
 
 	// Can not replace.
 	require.NoError(
@@ -323,10 +323,10 @@ func TestLowestSignedTargetEpoch_SaveRetrieveReplace(t *testing.T) {
 	)
 	got, _, err = validatorDB.LowestSignedTargetEpoch(ctx, p0)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(99), got)
+	require.Equal(t, types.Epoch(99), got)
 	got, _, err = validatorDB.LowestSignedTargetEpoch(ctx, p1)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(199), got)
+	require.Equal(t, types.Epoch(199), got)
 }
 
 func TestStore_SaveAttestationsForPubKey(t *testing.T) {
@@ -335,11 +335,11 @@ func TestStore_SaveAttestationsForPubKey(t *testing.T) {
 	pubKeys := make([][fieldparams.BLSPubkeyLength]byte, numValidators)
 	validatorDB := setupDB(t, pubKeys)
 	atts := make([]*ethpb.IndexedAttestation, 0)
-	signingRoots := make([][]byte, 0)
-	for i := primitives.Epoch(1); i < 10; i++ {
+	signingRoots := make([][32]byte, 0)
+	for i := types.Epoch(1); i < 10; i++ {
 		atts = append(atts, createAttestation(i-1, i))
-		var sr []byte
-		copy(sr, fmt.Sprintf("%d", i))
+		var sr [32]byte
+		copy(sr[:], fmt.Sprintf("%d", i))
 		signingRoots = append(signingRoots, sr)
 	}
 	err := validatorDB.SaveAttestationsForPubKey(
@@ -361,7 +361,7 @@ func TestStore_SaveAttestationsForPubKey(t *testing.T) {
 		slashingKind, err := validatorDB.CheckSlashableAttestation(
 			ctx,
 			pubKeys[0],
-			[]byte{},
+			[32]byte{},
 			att,
 		)
 		require.NotNil(t, err)
@@ -381,14 +381,14 @@ func TestSaveAttestationForPubKey_BatchWrites_FullCapacity(t *testing.T) {
 	var wg sync.WaitGroup
 	for i, pubKey := range pubKeys {
 		wg.Add(1)
-		go func(j primitives.Epoch, pk [fieldparams.BLSPubkeyLength]byte, w *sync.WaitGroup) {
+		go func(j types.Epoch, pk [fieldparams.BLSPubkeyLength]byte, w *sync.WaitGroup) {
 			defer w.Done()
 			var signingRoot [32]byte
 			copy(signingRoot[:], fmt.Sprintf("%d", j))
 			att := createAttestation(j, j+1)
 			err := validatorDB.SaveAttestationForPubKey(ctx, pk, signingRoot, att)
 			require.NoError(t, err)
-		}(primitives.Epoch(i), pubKey, &wg)
+		}(types.Epoch(i), pubKey, &wg)
 	}
 	wg.Wait()
 
@@ -438,14 +438,14 @@ func TestSaveAttestationForPubKey_BatchWrites_LowCapacity_TimerReached(t *testin
 	var wg sync.WaitGroup
 	for i, pubKey := range pubKeys {
 		wg.Add(1)
-		go func(j primitives.Epoch, pk [fieldparams.BLSPubkeyLength]byte, w *sync.WaitGroup) {
+		go func(j types.Epoch, pk [fieldparams.BLSPubkeyLength]byte, w *sync.WaitGroup) {
 			defer w.Done()
 			var signingRoot [32]byte
 			copy(signingRoot[:], fmt.Sprintf("%d", j))
 			att := createAttestation(j, j+1)
 			err := validatorDB.SaveAttestationForPubKey(ctx, pk, signingRoot, att)
 			require.NoError(t, err)
-		}(primitives.Epoch(i), pubKey, &wg)
+		}(types.Epoch(i), pubKey, &wg)
 	}
 	wg.Wait()
 
@@ -481,14 +481,14 @@ func TestSaveAttestationForPubKey_BatchWrites_LowCapacity_TimerReached(t *testin
 
 func BenchmarkStore_CheckSlashableAttestation_Surround_SafeAttestation_54kEpochs(b *testing.B) {
 	numValidators := 1
-	numEpochs := primitives.Epoch(54000)
+	numEpochs := types.Epoch(54000)
 	pubKeys := make([][fieldparams.BLSPubkeyLength]byte, numValidators)
 	benchCheckSurroundVote(b, pubKeys, numEpochs, false /* surround */)
 }
 
 func BenchmarkStore_CheckSurroundVote_Surround_Slashable_54kEpochs(b *testing.B) {
 	numValidators := 1
-	numEpochs := primitives.Epoch(54000)
+	numEpochs := types.Epoch(54000)
 	pubKeys := make([][fieldparams.BLSPubkeyLength]byte, numValidators)
 	benchCheckSurroundVote(b, pubKeys, numEpochs, true /* surround */)
 }
@@ -496,7 +496,7 @@ func BenchmarkStore_CheckSurroundVote_Surround_Slashable_54kEpochs(b *testing.B)
 func benchCheckSurroundVote(
 	b *testing.B,
 	pubKeys [][fieldparams.BLSPubkeyLength]byte,
-	numEpochs primitives.Epoch,
+	numEpochs types.Epoch,
 	shouldSurround bool,
 ) {
 	ctx := context.Background()
@@ -521,7 +521,7 @@ func benchCheckSurroundVote(
 			if err != nil {
 				return err
 			}
-			for epoch := primitives.Epoch(1); epoch < numEpochs; epoch++ {
+			for epoch := types.Epoch(1); epoch < numEpochs; epoch++ {
 				att := createAttestation(epoch-1, epoch)
 				sourceEpoch := bytesutil.EpochToBytesBigEndian(att.Data.Source.Epoch)
 				targetEpoch := bytesutil.EpochToBytesBigEndian(att.Data.Target.Epoch)
@@ -544,7 +544,7 @@ func benchCheckSurroundVote(
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, pubKey := range pubKeys {
-			slashingKind, err := validatorDB.CheckSlashableAttestation(ctx, pubKey, []byte{}, surroundingVote)
+			slashingKind, err := validatorDB.CheckSlashableAttestation(ctx, pubKey, [32]byte{}, surroundingVote)
 			if shouldSurround {
 				require.NotNil(b, err)
 				assert.Equal(b, SurroundingVote, slashingKind)
@@ -555,7 +555,7 @@ func benchCheckSurroundVote(
 	}
 }
 
-func createAttestation(source, target primitives.Epoch) *ethpb.IndexedAttestation {
+func createAttestation(source, target types.Epoch) *ethpb.IndexedAttestation {
 	return &ethpb.IndexedAttestation{
 		Data: &ethpb.AttestationData{
 			Source: &ethpb.Checkpoint{

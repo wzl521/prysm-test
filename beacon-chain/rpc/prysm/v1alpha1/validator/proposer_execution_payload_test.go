@@ -3,24 +3,23 @@ package validator
 import (
 	"context"
 	"errors"
-	"math/big"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 	gethtypes "github.com/ethereum/go-ethereum/core/types"
-	chainMock "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache"
-	dbTest "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/testing"
-	powtesting "github.com/prysmaticlabs/prysm/v5/beacon-chain/execution/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	pb "github.com/prysmaticlabs/prysm/v5/proto/engine/v1"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	chainMock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache"
+	dbTest "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/testing"
+	powtesting "github.com/prysmaticlabs/prysm/v3/beacon-chain/execution/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	pb "github.com/prysmaticlabs/prysm/v3/proto/engine/v1"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 	logTest "github.com/sirupsen/logrus/hooks/test"
 )
 
@@ -60,17 +59,7 @@ func TestServer_getExecutionPayload(t *testing.T) {
 		Root: b2r[:],
 	}))
 
-	capellaTransitionState, _ := util.DeterministicGenesisStateCapella(t, 1)
-	wrappedHeaderCapella, err := blocks.WrappedExecutionPayloadHeaderCapella(&pb.ExecutionPayloadHeaderCapella{BlockNumber: 1}, big.NewInt(0))
-	require.NoError(t, err)
-	require.NoError(t, capellaTransitionState.SetLatestExecutionPayloadHeader(wrappedHeaderCapella))
-	b2pbCapella := util.NewBeaconBlockCapella()
-	b2rCapella, err := b2pbCapella.Block.HashTreeRoot()
-	require.NoError(t, err)
-	util.SaveBlock(t, context.Background(), beaconDB, b2pbCapella)
-	require.NoError(t, capellaTransitionState.SetFinalizedCheckpoint(&ethpb.Checkpoint{
-		Root: b2rCapella[:],
-	}))
+	require.NoError(t, beaconDB.SaveFeeRecipientsByValidatorIDs(context.Background(), []types.ValidatorIndex{0}, []common.Address{{}}))
 
 	tests := []struct {
 		name              string
@@ -79,16 +68,13 @@ func TestServer_getExecutionPayload(t *testing.T) {
 		forkchoiceErr     error
 		payloadID         *pb.PayloadIDBytes
 		terminalBlockHash common.Hash
-		activationEpoch   primitives.Epoch
-		validatorIndx     primitives.ValidatorIndex
-		override          bool
-		wantedOverride    bool
+		activationEpoch   types.Epoch
+		validatorIndx     types.ValidatorIndex
 	}{
 		{
-			name:          "transition completed, nil payload id",
-			st:            transitionSt,
-			validatorIndx: 2,
-			errString:     "nil payload with block hash",
+			name:      "transition completed, nil payload id",
+			st:        transitionSt,
+			errString: "nil payload with block hash",
 		},
 		{
 			name:      "transition completed, happy case (has fee recipient in Db)",
@@ -102,15 +88,8 @@ func TestServer_getExecutionPayload(t *testing.T) {
 			validatorIndx: 1,
 		},
 		{
-			name:          "transition completed, capella, happy case (doesn't have fee recipient in Db)",
-			st:            capellaTransitionState,
-			payloadID:     &pb.PayloadIDBytes{0x1},
-			validatorIndx: 1,
-		},
-		{
-			name:          "transition completed, happy case, (payload ID cached)",
+			name:          "transition completed, happy case, payload ID cached)",
 			st:            transitionSt,
-			payloadID:     &pb.PayloadIDBytes{0x1},
 			validatorIndx: 100,
 		},
 		{
@@ -130,14 +109,6 @@ func TestServer_getExecutionPayload(t *testing.T) {
 			terminalBlockHash: [32]byte{0x1},
 			activationEpoch:   1,
 		},
-		{
-			name:           "local client override",
-			st:             transitionSt,
-			validatorIndx:  100,
-			override:       true,
-			payloadID:      &pb.PayloadIDBytes{0x1},
-			wantedOverride: true,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -147,70 +118,20 @@ func TestServer_getExecutionPayload(t *testing.T) {
 			params.OverrideBeaconConfig(cfg)
 
 			vs := &Server{
-				ExecutionEngineCaller:  &powtesting.EngineClient{PayloadIDBytes: tt.payloadID, ErrForkchoiceUpdated: tt.forkchoiceErr, ExecutionPayload: &pb.ExecutionPayload{}, BuilderOverride: tt.override},
+				ExecutionEngineCaller:  &powtesting.EngineClient{PayloadIDBytes: tt.payloadID, ErrForkchoiceUpdated: tt.forkchoiceErr},
 				HeadFetcher:            &chainMock.ChainService{State: tt.st},
-				FinalizationFetcher:    &chainMock.ChainService{},
 				BeaconDB:               beaconDB,
-				PayloadIDCache:         cache.NewPayloadIDCache(),
-				TrackedValidatorsCache: cache.NewTrackedValidatorsCache(),
+				ProposerSlotIndexCache: cache.NewProposerPayloadIDsCache(),
 			}
-			vs.TrackedValidatorsCache.Set(cache.TrackedValidator{Active: true, Index: tt.validatorIndx})
-			if tt.payloadID != nil {
-				vs.PayloadIDCache.Set(tt.st.Slot(), [32]byte{'a'}, [8]byte(*tt.payloadID))
-			}
-			blk := util.NewBeaconBlockBellatrix()
-			blk.Block.Slot = tt.st.Slot()
-			blk.Block.ProposerIndex = tt.validatorIndx
-			blk.Block.ParentRoot = bytesutil.PadTo([]byte{'a'}, 32)
-			b, err := blocks.NewSignedBeaconBlock(blk)
-			require.NoError(t, err)
-			var gotOverride bool
-			_, gotOverride, err = vs.getLocalPayload(context.Background(), b.Block(), tt.st)
+			vs.ProposerSlotIndexCache.SetProposerAndPayloadIDs(tt.st.Slot(), 100, [8]byte{100}, [32]byte{'a'})
+			_, err := vs.getExecutionPayload(context.Background(), tt.st.Slot(), tt.validatorIndx, [32]byte{'a'})
 			if tt.errString != "" {
 				require.ErrorContains(t, tt.errString, err)
 			} else {
-				require.Equal(t, tt.wantedOverride, gotOverride)
 				require.NoError(t, err)
 			}
 		})
 	}
-}
-
-func TestServer_getExecutionPayloadContextTimeout(t *testing.T) {
-	beaconDB := dbTest.SetupDB(t)
-	nonTransitionSt, _ := util.DeterministicGenesisStateBellatrix(t, 1)
-	b1pb := util.NewBeaconBlock()
-	b1r, err := b1pb.Block.HashTreeRoot()
-	require.NoError(t, err)
-	util.SaveBlock(t, context.Background(), beaconDB, b1pb)
-	require.NoError(t, nonTransitionSt.SetFinalizedCheckpoint(&ethpb.Checkpoint{
-		Root: b1r[:],
-	}))
-
-	require.NoError(t, beaconDB.SaveFeeRecipientsByValidatorIDs(context.Background(), []primitives.ValidatorIndex{0}, []common.Address{{}}))
-
-	cfg := params.BeaconConfig().Copy()
-	cfg.TerminalBlockHash = common.Hash{'a'}
-	cfg.TerminalBlockHashActivationEpoch = 1
-	params.OverrideBeaconConfig(cfg)
-
-	vs := &Server{
-		ExecutionEngineCaller:  &powtesting.EngineClient{PayloadIDBytes: &pb.PayloadIDBytes{}, ErrGetPayload: context.DeadlineExceeded, ExecutionPayload: &pb.ExecutionPayload{}},
-		HeadFetcher:            &chainMock.ChainService{State: nonTransitionSt},
-		BeaconDB:               beaconDB,
-		PayloadIDCache:         cache.NewPayloadIDCache(),
-		TrackedValidatorsCache: cache.NewTrackedValidatorsCache(),
-	}
-	vs.PayloadIDCache.Set(nonTransitionSt.Slot(), [32]byte{'a'}, [8]byte{100})
-
-	blk := util.NewBeaconBlockBellatrix()
-	blk.Block.Slot = nonTransitionSt.Slot()
-	blk.Block.ProposerIndex = 100
-	blk.Block.ParentRoot = bytesutil.PadTo([]byte{'a'}, 32)
-	b, err := blocks.NewSignedBeaconBlock(blk)
-	require.NoError(t, err)
-	_, _, err = vs.getLocalPayload(context.Background(), b.Block(), nonTransitionSt)
-	require.NoError(t, err)
 }
 
 func TestServer_getExecutionPayload_UnexpectedFeeRecipient(t *testing.T) {
@@ -238,6 +159,10 @@ func TestServer_getExecutionPayload_UnexpectedFeeRecipient(t *testing.T) {
 	}))
 
 	feeRecipient := common.BytesToAddress([]byte("a"))
+	require.NoError(t, beaconDB.SaveFeeRecipientsByValidatorIDs(context.Background(), []types.ValidatorIndex{0}, []common.Address{
+		feeRecipient,
+	}))
+
 	payloadID := &pb.PayloadIDBytes{0x1}
 	payload := emptyPayload()
 	payload.FeeRecipient = feeRecipient[:]
@@ -247,27 +172,12 @@ func TestServer_getExecutionPayload_UnexpectedFeeRecipient(t *testing.T) {
 			ExecutionPayload: payload,
 		},
 		HeadFetcher:            &chainMock.ChainService{State: transitionSt},
-		FinalizationFetcher:    &chainMock.ChainService{},
 		BeaconDB:               beaconDB,
-		PayloadIDCache:         cache.NewPayloadIDCache(),
-		TrackedValidatorsCache: cache.NewTrackedValidatorsCache(),
+		ProposerSlotIndexCache: cache.NewProposerPayloadIDsCache(),
 	}
-	val := cache.TrackedValidator{
-		Active:       true,
-		FeeRecipient: primitives.ExecutionAddress(feeRecipient),
-		Index:        0,
-	}
-	vs.TrackedValidatorsCache.Set(val)
-
-	blk := util.NewBeaconBlockBellatrix()
-	blk.Block.Slot = transitionSt.Slot()
-	blk.Block.ParentRoot = bytesutil.PadTo([]byte{}, 32)
-	b, err := blocks.NewSignedBeaconBlock(blk)
-	require.NoError(t, err)
-	gotPayload, _, err := vs.getLocalPayload(context.Background(), b.Block(), transitionSt)
+	gotPayload, err := vs.getExecutionPayload(context.Background(), transitionSt.Slot(), 0, [32]byte{})
 	require.NoError(t, err)
 	require.NotNil(t, gotPayload)
-	require.Equal(t, common.Address(gotPayload.FeeRecipient()), feeRecipient)
 
 	// We should NOT be getting the warning.
 	require.LogsDoNotContain(t, hook, "Fee recipient address from execution client is not what was expected")
@@ -275,9 +185,9 @@ func TestServer_getExecutionPayload_UnexpectedFeeRecipient(t *testing.T) {
 
 	evilRecipientAddress := common.BytesToAddress([]byte("evil"))
 	payload.FeeRecipient = evilRecipientAddress[:]
-	vs.PayloadIDCache = cache.NewPayloadIDCache()
+	vs.ProposerSlotIndexCache = cache.NewProposerPayloadIDsCache()
 
-	gotPayload, _, err = vs.getLocalPayload(context.Background(), b.Block(), transitionSt)
+	gotPayload, err = vs.getExecutionPayload(context.Background(), transitionSt.Slot(), 0, [32]byte{})
 	require.NoError(t, err)
 	require.NotNil(t, gotPayload)
 

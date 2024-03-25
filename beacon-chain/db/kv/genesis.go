@@ -1,26 +1,34 @@
 package kv
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/blocks"
-	dbIface "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/iface"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/encoding/ssz/detect"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/blocks"
+	dbIface "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/iface"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	statev1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	consensusblocks "github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 )
 
 // SaveGenesisData bootstraps the beaconDB with a given genesis state.
 func (s *Store) SaveGenesisData(ctx context.Context, genesisState state.BeaconState) error {
-	wsb, err := blocks.NewGenesisBlockForState(ctx, genesisState)
+	stateRoot, err := genesisState.HashTreeRoot(ctx)
+	if err != nil {
+		return err
+	}
+	genesisBlk := blocks.NewGenesisBlock(stateRoot[:])
+	genesisBlkRoot, err := genesisBlk.Block.HashTreeRoot()
 	if err != nil {
 		return errors.Wrap(err, "could not get genesis block root")
 	}
-	genesisBlkRoot, err := wsb.Block().HashTreeRoot()
+	wsb, err := consensusblocks.NewSignedBeaconBlock(genesisBlk)
 	if err != nil {
-		return errors.Wrap(err, "could not get genesis block root")
+		return errors.Wrap(err, "could not wrap genesis block")
 	}
 	if err := s.SaveBlock(ctx, wsb); err != nil {
 		return errors.Wrap(err, "could not save genesis block")
@@ -46,15 +54,11 @@ func (s *Store) SaveGenesisData(ctx context.Context, genesisState state.BeaconSt
 
 // LoadGenesis loads a genesis state from a ssz-serialized byte slice, if no genesis exists already.
 func (s *Store) LoadGenesis(ctx context.Context, sb []byte) error {
-	if len(sb) < (1 << 10) {
-		log.WithField("size", fmt.Sprintf("%d bytes", len(sb))).
-			Warn("Genesis state is smaller than one 1Kb. This could be an empty file, git lfs metadata file, or corrupt genesis state.")
-	}
-	vu, err := detect.FromState(sb)
-	if err != nil {
+	st := &ethpb.BeaconState{}
+	if err := st.UnmarshalSSZ(sb); err != nil {
 		return err
 	}
-	gs, err := vu.UnmarshalBeaconState(sb)
+	gs, err := statev1.InitializeFromProtoUnsafe(st)
 	if err != nil {
 		return err
 	}
@@ -79,6 +83,10 @@ func (s *Store) LoadGenesis(ctx context.Context, sb []byte) error {
 		return dbIface.ErrExistingGenesisState
 	}
 
+	if !bytes.Equal(gs.Fork().CurrentVersion, params.BeaconConfig().GenesisForkVersion) {
+		return fmt.Errorf("loaded genesis fork version (%#x) does not match config genesis "+
+			"fork version (%#x)", gs.Fork().CurrentVersion, params.BeaconConfig().GenesisForkVersion)
+	}
 	return s.SaveGenesisData(ctx, gs)
 }
 

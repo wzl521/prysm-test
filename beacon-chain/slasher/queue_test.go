@@ -3,17 +3,17 @@ package slasher
 import (
 	"testing"
 
-	slashertypes "github.com/prysmaticlabs/prysm/v5/beacon-chain/slasher/types"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	slashertypes "github.com/prysmaticlabs/prysm/v3/beacon-chain/slasher/types"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func Test_attestationsQueue(t *testing.T) {
 	t.Run("push_and_dequeue", func(tt *testing.T) {
 		attQueue := newAttestationsQueue()
 		wantedAtts := []*slashertypes.IndexedAttestationWrapper{
-			createAttestationWrapperEmptySig(t, 0, 1, []uint64{1}, make([]byte, 32)),
-			createAttestationWrapperEmptySig(t, 1, 2, []uint64{1}, make([]byte, 32)),
+			createAttestationWrapper(t, 0, 1, []uint64{1}, make([]byte, 32)),
+			createAttestationWrapper(t, 1, 2, []uint64{1}, make([]byte, 32)),
 		}
 		attQueue.push(wantedAtts[0])
 		attQueue.push(wantedAtts[1])
@@ -27,8 +27,8 @@ func Test_attestationsQueue(t *testing.T) {
 	t.Run("extend_and_dequeue", func(tt *testing.T) {
 		attQueue := newAttestationsQueue()
 		wantedAtts := []*slashertypes.IndexedAttestationWrapper{
-			createAttestationWrapperEmptySig(t, 0, 1, []uint64{1}, make([]byte, 32)),
-			createAttestationWrapperEmptySig(t, 1, 2, []uint64{1}, make([]byte, 32)),
+			createAttestationWrapper(t, 0, 1, []uint64{1}, make([]byte, 32)),
+			createAttestationWrapper(t, 1, 2, []uint64{1}, make([]byte, 32)),
 		}
 		attQueue.extend(wantedAtts)
 		require.DeepEqual(t, 2, attQueue.size())
@@ -43,8 +43,8 @@ func Test_blocksQueue(t *testing.T) {
 	t.Run("push_and_dequeue", func(tt *testing.T) {
 		blkQueue := newBlocksQueue()
 		wantedBlks := []*slashertypes.SignedBlockHeaderWrapper{
-			createProposalWrapper(t, 0, primitives.ValidatorIndex(1), make([]byte, 32)),
-			createProposalWrapper(t, 1, primitives.ValidatorIndex(1), make([]byte, 32)),
+			createProposalWrapper(t, 0, types.ValidatorIndex(1), make([]byte, 32)),
+			createProposalWrapper(t, 1, types.ValidatorIndex(1), make([]byte, 32)),
 		}
 		blkQueue.push(wantedBlks[0])
 		blkQueue.push(wantedBlks[1])
@@ -58,8 +58,8 @@ func Test_blocksQueue(t *testing.T) {
 	t.Run("extend_and_dequeue", func(tt *testing.T) {
 		blkQueue := newBlocksQueue()
 		wantedBlks := []*slashertypes.SignedBlockHeaderWrapper{
-			createProposalWrapper(t, 0, primitives.ValidatorIndex(1), make([]byte, 32)),
-			createProposalWrapper(t, 1, primitives.ValidatorIndex(1), make([]byte, 32)),
+			createProposalWrapper(t, 0, types.ValidatorIndex(1), make([]byte, 32)),
+			createProposalWrapper(t, 1, types.ValidatorIndex(1), make([]byte, 32)),
 		}
 		blkQueue.extend(wantedBlks)
 		require.DeepEqual(t, 2, blkQueue.size())

@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func TestStateSummary_CanSaveRetrieve(t *testing.T) {
@@ -45,7 +45,7 @@ func TestStateSummary_CacheToDB(t *testing.T) {
 
 	summaries := make([]*ethpb.StateSummary, stateSummaryCachePruneCount-1)
 	for i := range summaries {
-		summaries[i] = &ethpb.StateSummary{Slot: primitives.Slot(i), Root: bytesutil.PadTo(bytesutil.Uint64ToBytesLittleEndian(uint64(i)), 32)}
+		summaries[i] = &ethpb.StateSummary{Slot: types.Slot(i), Root: bytesutil.PadTo(bytesutil.Uint64ToBytesLittleEndian(uint64(i)), 32)}
 	}
 
 	require.NoError(t, db.SaveStateSummaries(context.Background(), summaries))
@@ -74,5 +74,5 @@ func TestStateSummary_CanDelete(t *testing.T) {
 	require.Equal(t, true, db.HasStateSummary(ctx, r1), "State summary should be saved")
 
 	require.NoError(t, db.deleteStateSummary(r1))
-	require.Equal(t, false, db.HasStateSummary(ctx, r1), "State summary should be deleted")
+	require.Equal(t, false, db.HasStateSummary(ctx, r1), "State summary should not be saved")
 }

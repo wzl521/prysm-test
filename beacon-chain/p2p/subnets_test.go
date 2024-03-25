@@ -10,17 +10,19 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
-	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/flags"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/wrapper"
-	ecdsaprysm "github.com/prysmaticlabs/prysm/v5/crypto/ecdsa"
-	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	statefeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/state"
+	"github.com/prysmaticlabs/prysm/v3/cmd/beacon-chain/flags"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/wrapper"
+	ecdsaprysm "github.com/prysmaticlabs/prysm/v3/crypto/ecdsa"
+	pb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func TestStartDiscV5_DiscoverPeersWithSubnets(t *testing.T) {
@@ -86,17 +88,15 @@ func TestStartDiscV5_DiscoverPeersWithSubnets(t *testing.T) {
 
 	// Make one service on port 4001.
 	port = 4001
-	gs := startup.NewClockSynchronizer()
 	cfg := &Config{
 		BootstrapNodeAddr:   []string{bootNode.String()},
 		Discv5BootStrapAddr: []string{bootNode.String()},
 		MaxPeers:            30,
 		UDPPort:             uint(port),
-		ClockWaiter:         gs,
 	}
+	cfg.StateNotifier = &mock.MockStateNotifier{}
 	s, err = NewService(context.Background(), cfg)
 	require.NoError(t, err)
-
 	exitRoutine := make(chan bool)
 	go func() {
 		s.Start()
@@ -104,8 +104,15 @@ func TestStartDiscV5_DiscoverPeersWithSubnets(t *testing.T) {
 	}()
 	time.Sleep(50 * time.Millisecond)
 	// Send in a loop to ensure it is delivered (busy wait for the service to subscribe to the state feed).
-	var vr [32]byte
-	require.NoError(t, gs.SetClock(startup.NewClock(time.Now(), vr)))
+	for sent := 0; sent == 0; {
+		sent = s.stateNotifier.StateFeed().Send(&feed.Event{
+			Type: statefeed.Initialized,
+			Data: &statefeed.InitializedData{
+				StartTime:             time.Now(),
+				GenesisValidatorsRoot: make([]byte, 32),
+			},
+		})
+	}
 
 	// Wait for the nodes to have their local routing tables to be populated with the other nodes
 	time.Sleep(6 * discoveryWaitTime)
@@ -487,39 +494,4 @@ func Test_SyncSubnets(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestSubnetComputation(t *testing.T) {
-	db, err := enode.OpenDB("")
-	assert.NoError(t, err)
-	defer db.Close()
-	priv, _, err := crypto.GenerateSecp256k1Key(rand.Reader)
-	assert.NoError(t, err)
-	convertedKey, err := ecdsaprysm.ConvertFromInterfacePrivKey(priv)
-	assert.NoError(t, err)
-	localNode := enode.NewLocalNode(db, convertedKey)
-
-	retrievedSubnets, err := computeSubscribedSubnets(localNode.ID(), 1000)
-	assert.NoError(t, err)
-	assert.Equal(t, retrievedSubnets[0]+1, retrievedSubnets[1])
-}
-
-func TestInitializePersistentSubnets(t *testing.T) {
-	cache.SubnetIDs.EmptyAllCaches()
-	defer cache.SubnetIDs.EmptyAllCaches()
-
-	db, err := enode.OpenDB("")
-	assert.NoError(t, err)
-	defer db.Close()
-	priv, _, err := crypto.GenerateSecp256k1Key(rand.Reader)
-	assert.NoError(t, err)
-	convertedKey, err := ecdsaprysm.ConvertFromInterfacePrivKey(priv)
-	assert.NoError(t, err)
-	localNode := enode.NewLocalNode(db, convertedKey)
-
-	assert.NoError(t, initializePersistentSubnets(localNode.ID(), 10000))
-	subs, ok, expTime := cache.SubnetIDs.GetPersistentSubnets()
-	assert.Equal(t, true, ok)
-	assert.Equal(t, 2, len(subs))
-	assert.Equal(t, true, expTime.After(time.Now()))
 }

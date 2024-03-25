@@ -2,23 +2,6 @@ package types
 
 import (
 	"github.com/pkg/errors"
-	consensus_types "github.com/prysmaticlabs/prysm/v5/consensus-types"
-)
-
-// DataType signifies the data type of the field.
-type DataType int
-
-// List of current data types the state supports.
-const (
-	// BasicArray represents a simple array type for a field.
-	BasicArray DataType = iota
-	// CompositeArray represents a variable length array with
-	// a non primitive type.
-	CompositeArray
-	// CompressedArray represents a variable length array which
-	// can pack multiple elements into a leaf of the underlying
-	// trie.
-	CompressedArray
 )
 
 // FieldIndex represents the relevant field position in the
@@ -26,7 +9,7 @@ const (
 type FieldIndex int
 
 // String returns the name of the field index.
-func (f FieldIndex) String() string {
+func (f FieldIndex) String(_ int) string {
 	switch f {
 	case GenesisTime:
 		return "genesisTime"
@@ -82,14 +65,6 @@ func (f FieldIndex) String() string {
 		return "nextSyncCommittee"
 	case LatestExecutionPayloadHeader:
 		return "latestExecutionPayloadHeader"
-	case LatestExecutionPayloadHeaderCapella:
-		return "LatestExecutionPayloadHeaderCapella"
-	case NextWithdrawalIndex:
-		return "NextWithdrawalIndex"
-	case NextWithdrawalValidatorIndex:
-		return "NextWithdrawalValidatorIndex"
-	case HistoricalSummaries:
-		return "HistoricalSummaries"
 	default:
 		return ""
 	}
@@ -147,14 +122,8 @@ func (f FieldIndex) RealPosition() int {
 		return 22
 	case NextSyncCommittee:
 		return 23
-	case LatestExecutionPayloadHeader, LatestExecutionPayloadHeaderCapella, LatestExecutionPayloadHeaderDeneb:
+	case LatestExecutionPayloadHeader:
 		return 24
-	case NextWithdrawalIndex:
-		return 25
-	case NextWithdrawalValidatorIndex:
-		return 26
-	case HistoricalSummaries:
-		return 27
 	default:
 		return -1
 	}
@@ -169,6 +138,10 @@ func (f FieldIndex) ElemsInChunk() (uint64, error) {
 	default:
 		return 0, errors.Errorf("field %d doesn't support element compression", f)
 	}
+}
+
+func (FieldIndex) Native() bool {
+	return true
 }
 
 // Below we define a set of useful enum values for the field
@@ -205,12 +178,4 @@ const (
 	CurrentSyncCommittee
 	NextSyncCommittee
 	LatestExecutionPayloadHeader
-	LatestExecutionPayloadHeaderCapella
-	LatestExecutionPayloadHeaderDeneb
-	NextWithdrawalIndex
-	NextWithdrawalValidatorIndex
-	HistoricalSummaries
 )
-
-// Enumerator keeps track of the number of states created since the node's start.
-var Enumerator = &consensus_types.ThreadSafeEnumerator{}

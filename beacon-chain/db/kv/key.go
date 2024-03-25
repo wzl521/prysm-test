@@ -23,31 +23,3 @@ func hasBellatrixBlindKey(enc []byte) bool {
 	}
 	return bytes.Equal(enc[:len(bellatrixBlindKey)], bellatrixBlindKey)
 }
-
-func hasCapellaKey(enc []byte) bool {
-	if len(capellaKey) >= len(enc) {
-		return false
-	}
-	return bytes.Equal(enc[:len(capellaKey)], capellaKey)
-}
-
-func hasCapellaBlindKey(enc []byte) bool {
-	if len(capellaBlindKey) >= len(enc) {
-		return false
-	}
-	return bytes.Equal(enc[:len(capellaBlindKey)], capellaBlindKey)
-}
-
-func hasDenebKey(enc []byte) bool {
-	if len(denebKey) >= len(enc) {
-		return false
-	}
-	return bytes.Equal(enc[:len(denebKey)], denebKey)
-}
-
-func hasDenebBlindKey(enc []byte) bool {
-	if len(denebBlindKey) >= len(enc) {
-		return false
-	}
-	return bytes.Equal(enc[:len(denebBlindKey)], denebBlindKey)
-}

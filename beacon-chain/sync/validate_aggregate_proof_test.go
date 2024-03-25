@@ -10,26 +10,25 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/prysmaticlabs/go-bitfield"
-	mock "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	dbtest "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/attestations"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	p2ptest "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	mockSync "github.com/prysmaticlabs/prysm/v5/beacon-chain/sync/initial-sync/testing"
-	lruwrpr "github.com/prysmaticlabs/prysm/v5/cache/lru"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/attestation"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	dbtest "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/attestations"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	p2ptest "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/testing"
+	mockSync "github.com/prysmaticlabs/prysm/v3/beacon-chain/sync/initial-sync/testing"
+	lruwrpr "github.com/prysmaticlabs/prysm/v3/cache/lru"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/attestation"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
 func TestVerifyIndexInCommittee_CanVerify(t *testing.T) {
@@ -37,7 +36,6 @@ func TestVerifyIndexInCommittee_CanVerify(t *testing.T) {
 	params.SetupTestConfigCleanup(t)
 	params.OverrideBeaconConfig(params.MinimalSpecConfig())
 
-	service := &Service{}
 	validators := uint64(32)
 	s, _ := util.DeterministicGenesisState(t, validators)
 	require.NoError(t, s.SetSlot(params.BeaconConfig().SlotsPerEpoch))
@@ -52,14 +50,10 @@ func TestVerifyIndexInCommittee_CanVerify(t *testing.T) {
 	assert.NoError(t, err)
 	indices, err := attestation.AttestingIndices(att.AggregationBits, committee)
 	require.NoError(t, err)
-	result, err := service.validateIndexInCommittee(ctx, s, att, primitives.ValidatorIndex(indices[0]))
-	require.NoError(t, err)
-	assert.Equal(t, pubsub.ValidationAccept, result)
+	require.NoError(t, validateIndexInCommittee(ctx, s, att, types.ValidatorIndex(indices[0])))
 
 	wanted := "validator index 1000 is not within the committee"
-	result, err = service.validateIndexInCommittee(ctx, s, att, 1000)
-	assert.ErrorContains(t, wanted, err)
-	assert.Equal(t, pubsub.ValidationReject, result)
+	assert.ErrorContains(t, wanted, validateIndexInCommittee(ctx, s, att, 1000))
 }
 
 func TestVerifyIndexInCommittee_ExistsInBeaconCommittee(t *testing.T) {
@@ -71,40 +65,18 @@ func TestVerifyIndexInCommittee_ExistsInBeaconCommittee(t *testing.T) {
 	s, _ := util.DeterministicGenesisState(t, validators)
 	require.NoError(t, s.SetSlot(params.BeaconConfig().SlotsPerEpoch))
 
+	bf := []byte{0xff}
 	att := &ethpb.Attestation{Data: &ethpb.AttestationData{
-		Target: &ethpb.Checkpoint{Epoch: 0}}}
+		Target: &ethpb.Checkpoint{Epoch: 0}},
+		AggregationBits: bf}
 
 	committee, err := helpers.BeaconCommitteeFromState(context.Background(), s, att.Data.Slot, att.Data.CommitteeIndex)
 	require.NoError(t, err)
 
-	bl := bitfield.NewBitlist(uint64(len(committee)))
-	att.AggregationBits = bl
-
-	service := &Service{}
-	result, err := service.validateIndexInCommittee(ctx, s, att, committee[0])
-	require.ErrorContains(t, "no attesting indices", err)
-	assert.Equal(t, pubsub.ValidationReject, result)
-
-	att.AggregationBits.SetBitAt(0, true)
-
-	result, err = service.validateIndexInCommittee(ctx, s, att, committee[0])
-	require.NoError(t, err)
-	assert.Equal(t, pubsub.ValidationAccept, result)
+	require.NoError(t, validateIndexInCommittee(ctx, s, att, committee[0]))
 
 	wanted := "validator index 1000 is not within the committee"
-	result, err = service.validateIndexInCommittee(ctx, s, att, 1000)
-	assert.ErrorContains(t, wanted, err)
-	assert.Equal(t, pubsub.ValidationReject, result)
-
-	att.AggregationBits = bitfield.NewBitlist(1)
-	result, err = service.validateIndexInCommittee(ctx, s, att, committee[0])
-	require.ErrorContains(t, "wanted participants bitfield length 4, got: 1", err)
-	assert.Equal(t, pubsub.ValidationReject, result)
-
-	att.Data.CommitteeIndex = 10000
-	result, err = service.validateIndexInCommittee(ctx, s, att, committee[0])
-	require.ErrorContains(t, "committee index 10000 > 2", err)
-	assert.Equal(t, pubsub.ValidationReject, result)
+	assert.ErrorContains(t, wanted, validateIndexInCommittee(ctx, s, att, 1000))
 }
 
 func TestVerifySelection_NotAnAggregator(t *testing.T) {
@@ -368,7 +340,7 @@ func TestValidateAggregateAndProof_CanValidate(t *testing.T) {
 	}
 	att.Signature = bls.AggregateSignatures(sigs).Marshal()
 	ai := committee[0]
-	sszUint := primitives.SSZUint64(att.Data.Slot)
+	sszUint := types.SSZUint64(att.Data.Slot)
 	sig, err := signing.ComputeDomainAndSign(beaconState, 0, &sszUint, params.BeaconConfig().DomainSelectionProof, privKeys[ai])
 	require.NoError(t, err)
 	aggregateAndProof := &ethpb.AggregateAttestationAndProof{
@@ -383,23 +355,21 @@ func TestValidateAggregateAndProof_CanValidate(t *testing.T) {
 	require.NoError(t, beaconState.SetGenesisTime(uint64(time.Now().Unix())))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	chain := &mock.ChainService{Genesis: time.Now().Add(-oneEpoch()),
-		Optimistic:       true,
-		DB:               db,
-		State:            beaconState,
-		ValidAttestation: true,
-		FinalizedCheckPoint: &ethpb.Checkpoint{
-			Epoch: 0,
-			Root:  att.Data.BeaconBlockRoot,
-		}}
 	r := &Service{
 		ctx: ctx,
 		cfg: &config{
-			p2p:                 p,
-			beaconDB:            db,
-			initialSync:         &mockSync.Sync{IsSyncing: false},
-			chain:               chain,
-			clock:               startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
+			p2p:         p,
+			beaconDB:    db,
+			initialSync: &mockSync.Sync{IsSyncing: false},
+			chain: &mock.ChainService{Genesis: time.Now().Add(-oneEpoch()),
+				Optimistic:       true,
+				DB:               db,
+				State:            beaconState,
+				ValidAttestation: true,
+				FinalizedCheckPoint: &ethpb.Checkpoint{
+					Epoch: 0,
+					Root:  att.Data.BeaconBlockRoot,
+				}},
 			attPool:             attestations.NewPool(),
 			attestationNotifier: (&mock.ChainService{}).OperationNotifier(),
 		},
@@ -471,7 +441,7 @@ func TestVerifyIndexInCommittee_SeenAggregatorEpoch(t *testing.T) {
 	}
 	att.Signature = bls.AggregateSignatures(sigs).Marshal()
 	ai := committee[0]
-	sszUint := primitives.SSZUint64(att.Data.Slot)
+	sszUint := types.SSZUint64(att.Data.Slot)
 	sig, err := signing.ComputeDomainAndSign(beaconState, 0, &sszUint, params.BeaconConfig().DomainSelectionProof, privKeys[ai])
 	require.NoError(t, err)
 	aggregateAndProof := &ethpb.AggregateAttestationAndProof{
@@ -486,23 +456,22 @@ func TestVerifyIndexInCommittee_SeenAggregatorEpoch(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	chain := &mock.ChainService{Genesis: time.Now().Add(-oneEpoch()),
-		DB:               db,
-		ValidatorsRoot:   [32]byte{'A'},
-		State:            beaconState,
-		ValidAttestation: true,
-		FinalizedCheckPoint: &ethpb.Checkpoint{
-			Epoch: 0,
-			Root:  signedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot,
-		}}
 	r := &Service{
 		ctx: ctx,
 		cfg: &config{
-			p2p:                 p,
-			beaconDB:            db,
-			initialSync:         &mockSync.Sync{IsSyncing: false},
-			chain:               chain,
-			clock:               startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
+			p2p:         p,
+			beaconDB:    db,
+			initialSync: &mockSync.Sync{IsSyncing: false},
+			chain: &mock.ChainService{Genesis: time.Now().Add(-oneEpoch()),
+				DB:               db,
+				ValidatorsRoot:   [32]byte{'A'},
+				State:            beaconState,
+				ValidAttestation: true,
+				FinalizedCheckPoint: &ethpb.Checkpoint{
+					Epoch: 0,
+					Root:  signedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot,
+				}},
+
 			attPool:             attestations.NewPool(),
 			attestationNotifier: (&mock.ChainService{}).OperationNotifier(),
 		},
@@ -591,7 +560,7 @@ func TestValidateAggregateAndProof_BadBlock(t *testing.T) {
 	}
 	att.Signature = bls.AggregateSignatures(sigs).Marshal()
 	ai := committee[0]
-	sszUint := primitives.SSZUint64(att.Data.Slot)
+	sszUint := types.SSZUint64(att.Data.Slot)
 	sig, err := signing.ComputeDomainAndSign(beaconState, 0, &sszUint, params.BeaconConfig().DomainSelectionProof, privKeys[ai])
 	require.NoError(t, err)
 
@@ -682,7 +651,7 @@ func TestValidateAggregateAndProof_RejectWhenAttEpochDoesntEqualTargetEpoch(t *t
 	}
 	att.Signature = bls.AggregateSignatures(sigs).Marshal()
 	ai := committee[0]
-	sszUint := primitives.SSZUint64(att.Data.Slot)
+	sszUint := types.SSZUint64(att.Data.Slot)
 	sig, err := signing.ComputeDomainAndSign(beaconState, 0, &sszUint, params.BeaconConfig().DomainSelectionProof, privKeys[ai])
 	require.NoError(t, err)
 	aggregateAndProof := &ethpb.AggregateAttestationAndProof{

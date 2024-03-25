@@ -3,100 +3,95 @@ package mock
 import (
 	"context"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
 )
 
-// StateManager is a fake implementation of StateManager.
-type StateManager struct {
+// MockStateManager is a fake implementation of StateManager.
+type MockStateManager struct {
 	StatesByRoot map[[32]byte]state.BeaconState
-	StatesBySlot map[primitives.Slot]state.BeaconState
+	StatesBySlot map[types.Slot]state.BeaconState
 }
 
-// NewService --
-func NewService() *StateManager {
-	return &StateManager{
+// NewMockService --
+func NewMockService() *MockStateManager {
+	return &MockStateManager{
 		StatesByRoot: make(map[[32]byte]state.BeaconState),
-		StatesBySlot: make(map[primitives.Slot]state.BeaconState),
+		StatesBySlot: make(map[types.Slot]state.BeaconState),
 	}
 }
 
 // StateByRootIfCachedNoCopy --
-func (_ *StateManager) StateByRootIfCachedNoCopy(_ [32]byte) state.BeaconState {
+func (_ *MockStateManager) StateByRootIfCachedNoCopy(_ [32]byte) state.BeaconState {
 	panic("implement me")
 }
 
 // Resume --
-func (_ *StateManager) Resume(_ context.Context, _ state.BeaconState) (state.BeaconState, error) {
+func (_ *MockStateManager) Resume(_ context.Context, _ state.BeaconState) (state.BeaconState, error) {
 	panic("implement me")
 }
 
 // SaveFinalizedState --
-func (_ *StateManager) SaveFinalizedState(_ primitives.Slot, _ [32]byte, _ state.BeaconState) {
+func (_ *MockStateManager) SaveFinalizedState(_ types.Slot, _ [32]byte, _ state.BeaconState) {
 	panic("implement me")
 }
 
 // MigrateToCold --
-func (_ *StateManager) MigrateToCold(_ context.Context, _ [32]byte) error {
+func (_ *MockStateManager) MigrateToCold(_ context.Context, _ [32]byte) error {
 	panic("implement me")
 }
 
 // HasState --
-func (_ *StateManager) HasState(_ context.Context, _ [32]byte) (bool, error) {
+func (_ *MockStateManager) HasState(_ context.Context, _ [32]byte) (bool, error) {
 	panic("implement me")
 }
 
 // StateByRoot --
-func (m *StateManager) StateByRoot(_ context.Context, blockRoot [32]byte) (state.BeaconState, error) {
+func (m *MockStateManager) StateByRoot(_ context.Context, blockRoot [32]byte) (state.BeaconState, error) {
 	return m.StatesByRoot[blockRoot], nil
 }
 
-// ActiveNonSlashedBalancesByRoot --
-func (*StateManager) ActiveNonSlashedBalancesByRoot(_ context.Context, _ [32]byte) ([]uint64, error) {
-	return []uint64{}, nil
-}
-
 // StateByRootInitialSync --
-func (_ *StateManager) StateByRootInitialSync(_ context.Context, _ [32]byte) (state.BeaconState, error) {
+func (_ *MockStateManager) StateByRootInitialSync(_ context.Context, _ [32]byte) (state.BeaconState, error) {
 	panic("implement me")
 }
 
 // StateBySlot --
-func (m *StateManager) StateBySlot(_ context.Context, slot primitives.Slot) (state.BeaconState, error) {
+func (m *MockStateManager) StateBySlot(_ context.Context, slot types.Slot) (state.BeaconState, error) {
 	return m.StatesBySlot[slot], nil
 }
 
 // SaveState --
-func (_ *StateManager) SaveState(_ context.Context, _ [32]byte, _ state.BeaconState) error {
+func (_ *MockStateManager) SaveState(_ context.Context, _ [32]byte, _ state.BeaconState) error {
 	panic("implement me")
 }
 
 // ForceCheckpoint --
-func (_ *StateManager) ForceCheckpoint(_ context.Context, _ []byte) error {
+func (_ *MockStateManager) ForceCheckpoint(_ context.Context, _ []byte) error {
 	panic("implement me")
 }
 
 // EnableSaveHotStateToDB --
-func (_ *StateManager) EnableSaveHotStateToDB(_ context.Context) {
+func (_ *MockStateManager) EnableSaveHotStateToDB(_ context.Context) {
 	panic("implement me")
 }
 
 // DisableSaveHotStateToDB --
-func (_ *StateManager) DisableSaveHotStateToDB(_ context.Context) error {
+func (_ *MockStateManager) DisableSaveHotStateToDB(_ context.Context) error {
 	panic("implement me")
 }
 
 // AddStateForRoot --
-func (m *StateManager) AddStateForRoot(state state.BeaconState, blockRoot [32]byte) {
+func (m *MockStateManager) AddStateForRoot(state state.BeaconState, blockRoot [32]byte) {
 	m.StatesByRoot[blockRoot] = state
 }
 
 // AddStateForSlot --
-func (m *StateManager) AddStateForSlot(state state.BeaconState, slot primitives.Slot) {
+func (m *MockStateManager) AddStateForSlot(state state.BeaconState, slot types.Slot) {
 	m.StatesBySlot[slot] = state
 }
 
 // DeleteStateFromCaches --
-func (m *StateManager) DeleteStateFromCaches(context.Context, [32]byte) error {
+func (m *MockStateManager) DeleteStateFromCaches(context.Context, [32]byte) error {
 	return nil
 }

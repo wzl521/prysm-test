@@ -6,16 +6,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager"
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
 )
 
 // ExtractKeystores retrieves the secret keys for specified public keys
 // in the function input, encrypts them using the specified password,
 // and returns their respective EIP-2335 keystores.
-func (*Keymanager) ExtractKeystores(
+func (_ *Keymanager) ExtractKeystores(
 	_ context.Context, publicKeys []bls.PublicKey, password string,
 ) ([]*keymanager.Keystore, error) {
 	lock.Lock()
@@ -44,11 +44,11 @@ func (*Keymanager) ExtractKeystores(
 			return nil, err
 		}
 		keystores[i] = &keymanager.Keystore{
-			Crypto:      cryptoFields,
-			ID:          id.String(),
-			Pubkey:      fmt.Sprintf("%x", pubKeyBytes),
-			Version:     encryptor.Version(),
-			Description: encryptor.Name(),
+			Crypto:  cryptoFields,
+			ID:      id.String(),
+			Pubkey:  fmt.Sprintf("%x", pubKeyBytes),
+			Version: encryptor.Version(),
+			Name:    encryptor.Name(),
 		}
 	}
 	return keystores, nil

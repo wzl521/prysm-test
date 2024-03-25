@@ -17,7 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
-	_ "github.com/prysmaticlabs/prysm/v5/runtime/maxprocs"
+	_ "github.com/prysmaticlabs/prysm/v3/runtime/maxprocs"
 	"github.com/sirupsen/logrus"
 )
 
@@ -76,11 +76,7 @@ func main() {
 
 	http.HandleFunc("/metrics", MetricsHTTP)
 	http.HandleFunc("/reload", ReloadHTTP)
-	srv := &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", *port),
-		ReadHeaderTimeout: 3 * time.Second,
-	}
-	log.Fatal(srv.ListenAndServe())
+	log.Fatal(http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", *port), nil))
 }
 
 // Watching address wrapper

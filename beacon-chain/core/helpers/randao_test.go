@@ -4,13 +4,13 @@ import (
 	"encoding/binary"
 	"testing"
 
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func TestRandaoMix_OK(t *testing.T) {
@@ -20,10 +20,10 @@ func TestRandaoMix_OK(t *testing.T) {
 		binary.LittleEndian.PutUint64(intInBytes, uint64(i))
 		randaoMixes[i] = intInBytes
 	}
-	state, err := state_native.InitializeFromProtoPhase0(&ethpb.BeaconState{RandaoMixes: randaoMixes})
+	state, err := v1.InitializeFromProto(&ethpb.BeaconState{RandaoMixes: randaoMixes})
 	require.NoError(t, err)
 	tests := []struct {
-		epoch     primitives.Epoch
+		epoch     types.Epoch
 		randaoMix []byte
 	}{
 		{
@@ -40,8 +40,6 @@ func TestRandaoMix_OK(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		ClearCache()
-
 		require.NoError(t, state.SetSlot(params.BeaconConfig().SlotsPerEpoch.Mul(uint64(test.epoch+1))))
 		mix, err := RandaoMix(state, test.epoch)
 		require.NoError(t, err)
@@ -56,10 +54,10 @@ func TestRandaoMix_CopyOK(t *testing.T) {
 		binary.LittleEndian.PutUint64(intInBytes, uint64(i))
 		randaoMixes[i] = intInBytes
 	}
-	state, err := state_native.InitializeFromProtoPhase0(&ethpb.BeaconState{RandaoMixes: randaoMixes})
+	state, err := v1.InitializeFromProto(&ethpb.BeaconState{RandaoMixes: randaoMixes})
 	require.NoError(t, err)
 	tests := []struct {
-		epoch     primitives.Epoch
+		epoch     types.Epoch
 		randaoMix []byte
 	}{
 		{
@@ -76,8 +74,6 @@ func TestRandaoMix_CopyOK(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		ClearCache()
-
 		require.NoError(t, state.SetSlot(params.BeaconConfig().SlotsPerEpoch.Mul(uint64(test.epoch+1))))
 		mix, err := RandaoMix(state, test.epoch)
 		require.NoError(t, err)
@@ -92,8 +88,6 @@ func TestRandaoMix_CopyOK(t *testing.T) {
 }
 
 func TestGenerateSeed_OK(t *testing.T) {
-	ClearCache()
-
 	randaoMixes := make([][]byte, params.BeaconConfig().EpochsPerHistoricalVector)
 	for i := 0; i < len(randaoMixes); i++ {
 		intInBytes := make([]byte, 32)
@@ -101,7 +95,7 @@ func TestGenerateSeed_OK(t *testing.T) {
 		randaoMixes[i] = intInBytes
 	}
 	slot := params.BeaconConfig().SlotsPerEpoch.Mul(uint64(params.BeaconConfig().MinSeedLookahead * 10))
-	state, err := state_native.InitializeFromProtoPhase0(&ethpb.BeaconState{
+	state, err := v1.InitializeFromProto(&ethpb.BeaconState{
 		RandaoMixes: randaoMixes,
 		Slot:        slot,
 	})

@@ -4,17 +4,17 @@ import (
 	"context"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 	"google.golang.org/protobuf/proto"
 
-	mock "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/slashings"
-	mockp2p "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/testing"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/slashings"
+	mockp2p "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/testing"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func TestServer_SubmitProposerSlashing(t *testing.T) {
@@ -38,12 +38,12 @@ func TestServer_SubmitProposerSlashing(t *testing.T) {
 
 	// We want a proposer slashing for validator with index 2 to
 	// be included in the pool.
-	slashing, err := util.GenerateProposerSlashingForValidator(st, privs[2], primitives.ValidatorIndex(2))
+	slashing, err := util.GenerateProposerSlashingForValidator(st, privs[2], types.ValidatorIndex(2))
 	require.NoError(t, err)
 
 	_, err = bs.SubmitProposerSlashing(ctx, slashing)
 	require.NoError(t, err)
-	assert.Equal(t, true, mb.BroadcastCalled.Load(), "Expected broadcast to be called")
+	assert.Equal(t, true, mb.BroadcastCalled, "Expected broadcast to be called")
 }
 
 func TestServer_SubmitAttesterSlashing(t *testing.T) {
@@ -66,7 +66,7 @@ func TestServer_SubmitAttesterSlashing(t *testing.T) {
 		Broadcaster:   mb,
 	}
 
-	slashing, err := util.GenerateAttesterSlashingForValidator(st, privs[2], primitives.ValidatorIndex(2))
+	slashing, err := util.GenerateAttesterSlashingForValidator(st, privs[2], types.ValidatorIndex(2))
 	require.NoError(t, err)
 
 	// We want the intersection of the slashing attesting indices
@@ -74,7 +74,7 @@ func TestServer_SubmitAttesterSlashing(t *testing.T) {
 	// slashed indices.
 	_, err = bs.SubmitAttesterSlashing(ctx, slashing)
 	require.NoError(t, err)
-	assert.Equal(t, true, mb.BroadcastCalled.Load(), "Expected broadcast to be called when flag is set")
+	assert.Equal(t, true, mb.BroadcastCalled, "Expected broadcast to be called when flag is set")
 }
 
 func TestServer_SubmitProposerSlashing_DontBroadcast(t *testing.T) {
@@ -100,9 +100,9 @@ func TestServer_SubmitProposerSlashing_DontBroadcast(t *testing.T) {
 	// We want a proposer slashing for validator with index 2 to
 	// be included in the pool.
 	wanted := &ethpb.SubmitSlashingResponse{
-		SlashedIndices: []primitives.ValidatorIndex{2},
+		SlashedIndices: []types.ValidatorIndex{2},
 	}
-	slashing, err := util.GenerateProposerSlashingForValidator(st, privs[2], primitives.ValidatorIndex(2))
+	slashing, err := util.GenerateProposerSlashingForValidator(st, privs[2], types.ValidatorIndex(2))
 	require.NoError(t, err)
 
 	res, err := bs.SubmitProposerSlashing(ctx, slashing)
@@ -111,9 +111,9 @@ func TestServer_SubmitProposerSlashing_DontBroadcast(t *testing.T) {
 		t.Errorf("Wanted %v, received %v", wanted, res)
 	}
 
-	assert.Equal(t, false, mb.BroadcastCalled.Load(), "Expected broadcast not to be called by default")
+	assert.Equal(t, false, mb.BroadcastCalled, "Expected broadcast not to be called by default")
 
-	slashing, err = util.GenerateProposerSlashingForValidator(st, privs[5], primitives.ValidatorIndex(5))
+	slashing, err = util.GenerateProposerSlashingForValidator(st, privs[5], types.ValidatorIndex(5))
 	require.NoError(t, err)
 
 	// We do not want a proposer slashing for an already slashed validator
@@ -144,23 +144,23 @@ func TestServer_SubmitAttesterSlashing_DontBroadcast(t *testing.T) {
 		Broadcaster:   mb,
 	}
 
-	slashing, err := util.GenerateAttesterSlashingForValidator(st, privs[2], primitives.ValidatorIndex(2))
+	slashing, err := util.GenerateAttesterSlashingForValidator(st, privs[2], types.ValidatorIndex(2))
 	require.NoError(t, err)
 
 	// We want the intersection of the slashing attesting indices
 	// to be slashed, so we expect validators 2 and 3 to be in the response
 	// slashed indices.
 	wanted := &ethpb.SubmitSlashingResponse{
-		SlashedIndices: []primitives.ValidatorIndex{2},
+		SlashedIndices: []types.ValidatorIndex{2},
 	}
 	res, err := bs.SubmitAttesterSlashing(ctx, slashing)
 	require.NoError(t, err)
 	if !proto.Equal(wanted, res) {
 		t.Errorf("Wanted %v, received %v", wanted, res)
 	}
-	assert.Equal(t, false, mb.BroadcastCalled.Load(), "Expected broadcast not to be called by default")
+	assert.Equal(t, false, mb.BroadcastCalled, "Expected broadcast not to be called by default")
 
-	slashing, err = util.GenerateAttesterSlashingForValidator(st, privs[5], primitives.ValidatorIndex(5))
+	slashing, err = util.GenerateAttesterSlashingForValidator(st, privs[5], types.ValidatorIndex(5))
 	require.NoError(t, err)
 	// If any of the attesting indices in the slashing object have already
 	// been slashed, we should fail to insert properly into the attester slashing pool.

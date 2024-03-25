@@ -2,33 +2,29 @@ package migration
 
 import (
 	"github.com/pkg/errors"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpbv1 "github.com/prysmaticlabs/prysm/v3/proto/eth/v1"
+	ethpbalpha "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpbv1 "github.com/prysmaticlabs/prysm/v5/proto/eth/v1"
-	ethpbalpha "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 )
 
 // BlockIfaceToV1BlockHeader converts a signed beacon block interface into a signed beacon block header.
-func BlockIfaceToV1BlockHeader(block interfaces.ReadOnlySignedBeaconBlock) (*ethpbv1.SignedBeaconBlockHeader, error) {
+func BlockIfaceToV1BlockHeader(block interfaces.SignedBeaconBlock) (*ethpbv1.SignedBeaconBlockHeader, error) {
 	bodyRoot, err := block.Block().Body().HashTreeRoot()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get body root of block")
 	}
-	parentRoot := block.Block().ParentRoot()
-	stateRoot := block.Block().StateRoot()
-	sig := block.Signature()
 	return &ethpbv1.SignedBeaconBlockHeader{
 		Message: &ethpbv1.BeaconBlockHeader{
 			Slot:          block.Block().Slot(),
 			ProposerIndex: block.Block().ProposerIndex(),
-			ParentRoot:    parentRoot[:],
-			StateRoot:     stateRoot[:],
+			ParentRoot:    block.Block().ParentRoot(),
+			StateRoot:     block.Block().StateRoot(),
 			BodyRoot:      bodyRoot[:],
 		},
-		Signature: sig[:],
+		Signature: block.Signature(),
 	}, nil
 }
 
@@ -58,7 +54,7 @@ func V1ToV1Alpha1SignedBlock(v1Blk *ethpbv1.SignedBeaconBlock) (*ethpbalpha.Sign
 	return v1alpha1Block, nil
 }
 
-// V1Alpha1ToV1Block converts a v1alpha1 ReadOnlyBeaconBlock proto to a v1 proto.
+// V1Alpha1ToV1Block converts a v1alpha1 BeaconBlock proto to a v1 proto.
 func V1Alpha1ToV1Block(alphaBlk *ethpbalpha.BeaconBlock) (*ethpbv1.BeaconBlock, error) {
 	marshaledBlk, err := proto.Marshal(alphaBlk)
 	if err != nil {
@@ -171,23 +167,14 @@ func V1Alpha1SignedHeaderToV1(v1alpha1Hdr *ethpbalpha.SignedBeaconBlockHeader) *
 		return &ethpbv1.SignedBeaconBlockHeader{}
 	}
 	return &ethpbv1.SignedBeaconBlockHeader{
-		Message:   V1Alpha1HeaderToV1(v1alpha1Hdr.Header),
+		Message: &ethpbv1.BeaconBlockHeader{
+			Slot:          v1alpha1Hdr.Header.Slot,
+			ProposerIndex: v1alpha1Hdr.Header.ProposerIndex,
+			ParentRoot:    v1alpha1Hdr.Header.ParentRoot,
+			StateRoot:     v1alpha1Hdr.Header.StateRoot,
+			BodyRoot:      v1alpha1Hdr.Header.BodyRoot,
+		},
 		Signature: v1alpha1Hdr.Signature,
-	}
-}
-
-// V1Alpha1HeaderToV1 converts a v1alpha1 beacon block header to v1.
-func V1Alpha1HeaderToV1(v1alpha1Hdr *ethpbalpha.BeaconBlockHeader) *ethpbv1.BeaconBlockHeader {
-	if v1alpha1Hdr == nil {
-		return &ethpbv1.BeaconBlockHeader{}
-	}
-
-	return &ethpbv1.BeaconBlockHeader{
-		Slot:          v1alpha1Hdr.Slot,
-		ProposerIndex: v1alpha1Hdr.ProposerIndex,
-		ParentRoot:    v1alpha1Hdr.ParentRoot,
-		StateRoot:     v1alpha1Hdr.StateRoot,
-		BodyRoot:      v1alpha1Hdr.BodyRoot,
 	}
 }
 
@@ -205,20 +192,6 @@ func V1SignedHeaderToV1Alpha1(v1Header *ethpbv1.SignedBeaconBlockHeader) *ethpba
 			BodyRoot:      v1Header.Message.BodyRoot,
 		},
 		Signature: v1Header.Signature,
-	}
-}
-
-// V1HeaderToV1Alpha1 converts a v1 beacon block header to v1alpha1.
-func V1HeaderToV1Alpha1(v1Header *ethpbv1.BeaconBlockHeader) *ethpbalpha.BeaconBlockHeader {
-	if v1Header == nil {
-		return &ethpbalpha.BeaconBlockHeader{}
-	}
-	return &ethpbalpha.BeaconBlockHeader{
-		Slot:          v1Header.Slot,
-		ProposerIndex: v1Header.ProposerIndex,
-		ParentRoot:    v1Header.ParentRoot,
-		StateRoot:     v1Header.StateRoot,
-		BodyRoot:      v1Header.BodyRoot,
 	}
 }
 
@@ -362,7 +335,7 @@ func V1ValidatorToV1Alpha1(v1Validator *ethpbv1.Validator) *ethpbalpha.Validator
 }
 
 // SignedBeaconBlock converts a signed beacon block interface to a v1alpha1 block.
-func SignedBeaconBlock(block interfaces.ReadOnlySignedBeaconBlock) (*ethpbv1.SignedBeaconBlock, error) {
+func SignedBeaconBlock(block interfaces.SignedBeaconBlock) (*ethpbv1.SignedBeaconBlock, error) {
 	if block == nil || block.IsNil() {
 		return nil, errors.New("could not find requested block")
 	}
@@ -465,10 +438,6 @@ func BeaconStateToProto(state state.BeaconState) (*ethpbv1.BeaconState, error) {
 		}
 	}
 
-	hRoot, err := state.HistoricalRoots()
-	if err != nil {
-		return nil, errors.Wrapf(err, "could not get historical roots from state")
-	}
 	result := &ethpbv1.BeaconState{
 		GenesisTime:           state.GenesisTime(),
 		GenesisValidatorsRoot: bytesutil.SafeCopyBytes(state.GenesisValidatorsRoot()),
@@ -487,7 +456,7 @@ func BeaconStateToProto(state state.BeaconState) (*ethpbv1.BeaconState, error) {
 		},
 		BlockRoots:      bytesutil.SafeCopy2dBytes(state.BlockRoots()),
 		StateRoots:      bytesutil.SafeCopy2dBytes(state.StateRoots()),
-		HistoricalRoots: bytesutil.SafeCopy2dBytes(hRoot),
+		HistoricalRoots: bytesutil.SafeCopy2dBytes(state.HistoricalRoots()),
 		Eth1Data: &ethpbv1.Eth1Data{
 			DepositRoot:  bytesutil.SafeCopyBytes(sourceEth1Data.DepositRoot),
 			DepositCount: sourceEth1Data.DepositCount,

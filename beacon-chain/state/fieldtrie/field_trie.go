@@ -5,10 +5,9 @@ import (
 	"sync"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native/types"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stateutil"
-	multi_value_slice "github.com/prysmaticlabs/prysm/v5/container/multi-value-slice"
-	pmath "github.com/prysmaticlabs/prysm/v5/math"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stateutil"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/types"
+	pmath "github.com/prysmaticlabs/prysm/v3/math"
 )
 
 var (
@@ -16,21 +15,13 @@ var (
 	ErrEmptyFieldTrie   = errors.New("empty field trie")
 )
 
-// sliceAccessor describes an interface for a multivalue slice
-// object that returns information about the multivalue slice along with the
-// particular state instance we are referencing.
-type sliceAccessor interface {
-	Len(obj multi_value_slice.Identifiable) int
-	State() multi_value_slice.Identifiable
-}
-
 // FieldTrie is the representation of the representative
 // trie of the particular field.
 type FieldTrie struct {
 	*sync.RWMutex
 	reference     *stateutil.Reference
 	fieldLayers   [][]*[32]byte
-	field         types.FieldIndex
+	field         types.BeaconStateField
 	dataType      types.DataType
 	length        uint64
 	numOfElems    int
@@ -40,11 +31,11 @@ type FieldTrie struct {
 // NewFieldTrie is the constructor for the field trie data structure. It creates the corresponding
 // trie according to the given parameters. Depending on whether the field is a basic/composite array
 // which is either fixed/variable length, it will appropriately determine the trie.
-func NewFieldTrie(field types.FieldIndex, fieldInfo types.DataType, elements interface{}, length uint64) (*FieldTrie, error) {
+func NewFieldTrie(field types.BeaconStateField, dataType types.DataType, elements interface{}, length uint64) (*FieldTrie, error) {
 	if elements == nil {
 		return &FieldTrie{
 			field:      field,
-			dataType:   fieldInfo,
+			dataType:   dataType,
 			reference:  stateutil.NewRef(1),
 			RWMutex:    new(sync.RWMutex),
 			length:     length,
@@ -52,21 +43,22 @@ func NewFieldTrie(field types.FieldIndex, fieldInfo types.DataType, elements int
 		}, nil
 	}
 
-	fieldRoots, err := fieldConverters(field, []uint64{}, elements, true)
+	var fieldRoots [][32]byte
+	var err error
+	if field.Native() {
+		fieldRoots, err = fieldConvertersNative(field, []uint64{}, elements, true)
+	} else {
+		fieldRoots, err = fieldConverters(field, []uint64{}, elements, true)
+	}
+
 	if err != nil {
 		return nil, err
 	}
 
-	if err := validateElements(field, fieldInfo, elements, length); err != nil {
+	if err := validateElements(field, dataType, elements, length); err != nil {
 		return nil, err
 	}
-	var numOfElems int
-	if val, ok := elements.(sliceAccessor); ok {
-		numOfElems = val.Len(val.State())
-	} else {
-		numOfElems = reflect.Indirect(reflect.ValueOf(elements)).Len()
-	}
-	switch fieldInfo {
+	switch dataType {
 	case types.BasicArray:
 		fl, err := stateutil.ReturnTrieLayer(fieldRoots, length)
 		if err != nil {
@@ -75,25 +67,26 @@ func NewFieldTrie(field types.FieldIndex, fieldInfo types.DataType, elements int
 		return &FieldTrie{
 			fieldLayers: fl,
 			field:       field,
-			dataType:    fieldInfo,
+			dataType:    dataType,
 			reference:   stateutil.NewRef(1),
 			RWMutex:     new(sync.RWMutex),
 			length:      length,
-			numOfElems:  numOfElems,
+			numOfElems:  reflect.Indirect(reflect.ValueOf(elements)).Len(),
 		}, nil
 	case types.CompositeArray, types.CompressedArray:
 		return &FieldTrie{
 			fieldLayers: stateutil.ReturnTrieLayerVariable(fieldRoots, length),
 			field:       field,
-			dataType:    fieldInfo,
+			dataType:    dataType,
 			reference:   stateutil.NewRef(1),
 			RWMutex:     new(sync.RWMutex),
 			length:      length,
-			numOfElems:  numOfElems,
+			numOfElems:  reflect.Indirect(reflect.ValueOf(elements)).Len(),
 		}, nil
 	default:
-		return nil, errors.Errorf("unrecognized data type in field map: %v", reflect.TypeOf(fieldInfo).Name())
+		return nil, errors.Errorf("unrecognized data type in field map: %v", reflect.TypeOf(dataType).Name())
 	}
+
 }
 
 // RecomputeTrie rebuilds the affected branches in the trie according to the provided
@@ -107,7 +100,13 @@ func (f *FieldTrie) RecomputeTrie(indices []uint64, elements interface{}) ([32]b
 		return f.TrieRoot()
 	}
 
-	fieldRoots, err := fieldConverters(f.field, indices, elements, false)
+	var fieldRoots [][32]byte
+	var err error
+	if f.field.Native() {
+		fieldRoots, err = fieldConvertersNative(f.field, indices, elements, false)
+	} else {
+		fieldRoots, err = fieldConverters(f.field, indices, elements, false)
+	}
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -115,23 +114,20 @@ func (f *FieldTrie) RecomputeTrie(indices []uint64, elements interface{}) ([32]b
 	if err := f.validateIndices(indices); err != nil {
 		return [32]byte{}, err
 	}
-	if val, ok := elements.(sliceAccessor); ok {
-		f.numOfElems = val.Len(val.State())
-	} else {
-		f.numOfElems = reflect.Indirect(reflect.ValueOf(elements)).Len()
-	}
 	switch f.dataType {
 	case types.BasicArray:
 		fieldRoot, f.fieldLayers, err = stateutil.RecomputeFromLayer(fieldRoots, indices, f.fieldLayers)
 		if err != nil {
 			return [32]byte{}, err
 		}
+		f.numOfElems = reflect.Indirect(reflect.ValueOf(elements)).Len()
 		return fieldRoot, nil
 	case types.CompositeArray:
 		fieldRoot, f.fieldLayers, err = stateutil.RecomputeFromLayerVariable(fieldRoots, indices, f.fieldLayers)
 		if err != nil {
 			return [32]byte{}, err
 		}
+		f.numOfElems = reflect.Indirect(reflect.ValueOf(elements)).Len()
 		return stateutil.AddInMixin(fieldRoot, uint64(len(f.fieldLayers[0])))
 	case types.CompressedArray:
 		numOfElems, err := f.field.ElemsInChunk()
@@ -160,6 +156,7 @@ func (f *FieldTrie) RecomputeTrie(indices []uint64, elements interface{}) ([32]b
 		if err != nil {
 			return [32]byte{}, err
 		}
+		f.numOfElems = reflect.Indirect(reflect.ValueOf(elements)).Len()
 		return stateutil.AddInMixin(fieldRoot, uint64(f.numOfElems))
 	default:
 		return [32]byte{}, errors.Errorf("unrecognized data type in field map: %v", reflect.TypeOf(f.dataType).Name())

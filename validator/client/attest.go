@@ -3,25 +3,27 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/async"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/monitoring/tracing"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	validatorpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/validator-client"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
-	"github.com/prysmaticlabs/prysm/v5/validator/client/iface"
+	"github.com/prysmaticlabs/prysm/v3/async"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/hash"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/monitoring/tracing"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	validatorpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/validator-client"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/validator/client/iface"
 	"github.com/sirupsen/logrus"
 	"go.opencensus.io/trace"
 )
@@ -30,7 +32,7 @@ import (
 // It fetches the latest beacon block head along with the latest canonical beacon state
 // information in order to sign the block and include information about the validator's
 // participation in voting on the block.
-func (v *validator) SubmitAttestation(ctx context.Context, slot primitives.Slot, pubKey [fieldparams.BLSPubkeyLength]byte) {
+func (v *validator) SubmitAttestation(ctx context.Context, slot types.Slot, pubKey [fieldparams.BLSPubkeyLength]byte) {
 	ctx, span := trace.StartSpan(ctx, "validator.SubmitAttestation")
 	defer span.End()
 	span.AddAttributes(trace.StringAttribute("validator", fmt.Sprintf("%#x", pubKey)))
@@ -54,7 +56,7 @@ func (v *validator) SubmitAttestation(ctx context.Context, slot primitives.Slot,
 	defer lock.Unlock()
 
 	fmtKey := fmt.Sprintf("%#x", pubKey[:])
-	log := log.WithField("pubkey", fmt.Sprintf("%#x", bytesutil.Trunc(pubKey[:]))).WithField("slot", slot)
+	log := log.WithField("pubKey", fmt.Sprintf("%#x", bytesutil.Trunc(pubKey[:]))).WithField("slot", slot)
 	duty, err := v.duty(pubKey)
 	if err != nil {
 		log.WithError(err).Error("Could not fetch validator assignment")
@@ -153,7 +155,7 @@ func (v *validator) SubmitAttestation(ctx context.Context, slot primitives.Slot,
 		return
 	}
 
-	if err := v.saveSubmittedAtt(data, pubKey[:], false); err != nil {
+	if err := v.saveAttesterIndexToData(data, duty.ValidatorIndex); err != nil {
 		log.WithError(err).Error("Could not save validator index for logging")
 		if v.emitAccountMetrics {
 			ValidatorAttestFailVec.WithLabelValues(fmtKey).Inc()
@@ -180,13 +182,11 @@ func (v *validator) SubmitAttestation(ctx context.Context, slot primitives.Slot,
 
 // Given the validator public key, this gets the validator assignment.
 func (v *validator) duty(pubKey [fieldparams.BLSPubkeyLength]byte) (*ethpb.DutiesResponse_Duty, error) {
-	v.dutiesLock.RLock()
-	defer v.dutiesLock.RUnlock()
 	if v.duties == nil {
 		return nil, errors.New("no duties for validators")
 	}
 
-	for _, duty := range v.duties.CurrentEpochDuties {
+	for _, duty := range v.duties.Duties {
 		if bytes.Equal(pubKey[:], duty.PublicKey) {
 			return duty, nil
 		}
@@ -196,7 +196,7 @@ func (v *validator) duty(pubKey [fieldparams.BLSPubkeyLength]byte) (*ethpb.Dutie
 }
 
 // Given validator's public key, this function returns the signature of an attestation data and its signing root.
-func (v *validator) signAtt(ctx context.Context, pubKey [fieldparams.BLSPubkeyLength]byte, data *ethpb.AttestationData, slot primitives.Slot) ([]byte, [32]byte, error) {
+func (v *validator) signAtt(ctx context.Context, pubKey [fieldparams.BLSPubkeyLength]byte, data *ethpb.AttestationData, slot types.Slot) ([]byte, [32]byte, error) {
 	domain, root, err := v.getDomainAndSigningRoot(ctx, data)
 	if err != nil {
 		return nil, [32]byte{}, err
@@ -227,35 +227,39 @@ func (v *validator) getDomainAndSigningRoot(ctx context.Context, data *ethpb.Att
 	return domain, root, nil
 }
 
-// highestSlot returns the highest slot with a valid block seen by the validator
-func (v *validator) highestSlot() primitives.Slot {
-	v.highestValidSlotLock.Lock()
-	defer v.highestValidSlotLock.Unlock()
-	return v.highestValidSlot
-}
+// For logging, this saves the last submitted attester index to its attestation data. The purpose of this
+// is to enhance attesting logs to be readable when multiple validator keys ran in a single client.
+func (v *validator) saveAttesterIndexToData(data *ethpb.AttestationData, index types.ValidatorIndex) error {
+	v.attLogsLock.Lock()
+	defer v.attLogsLock.Unlock()
 
-// setHighestSlot sets the highest slot with a valid block seen by the validator
-func (v *validator) setHighestSlot(slot primitives.Slot) {
-	v.highestValidSlotLock.Lock()
-	defer v.highestValidSlotLock.Unlock()
-	if slot > v.highestValidSlot {
-		v.highestValidSlot = slot
-		v.slotFeed.Send(slot)
+	h, err := hash.HashProto(data)
+	if err != nil {
+		return err
 	}
+
+	if v.attLogs[h] == nil {
+		v.attLogs[h] = &attSubmitted{data, []types.ValidatorIndex{}, []types.ValidatorIndex{}}
+	}
+	v.attLogs[h] = &attSubmitted{data, append(v.attLogs[h].attesterIndices, index), []types.ValidatorIndex{}}
+
+	return nil
 }
 
 // waitOneThirdOrValidBlock waits until (a) or (b) whichever comes first:
-//
-//	(a) the validator has received a valid block that is the same slot as input slot
-//	(b) one-third of the slot has transpired (SECONDS_PER_SLOT / 3 seconds after the start of slot)
-func (v *validator) waitOneThirdOrValidBlock(ctx context.Context, slot primitives.Slot) {
+//   (a) the validator has received a valid block that is the same slot as input slot
+//   (b) one-third of the slot has transpired (SECONDS_PER_SLOT / 3 seconds after the start of slot)
+func (v *validator) waitOneThirdOrValidBlock(ctx context.Context, slot types.Slot) {
 	ctx, span := trace.StartSpan(ctx, "validator.waitOneThirdOrValidBlock")
 	defer span.End()
 
 	// Don't need to wait if requested slot is the same as highest valid slot.
-	if slot <= v.highestSlot() {
+	v.highestValidSlotLock.Lock()
+	if slot <= v.highestValidSlot {
+		v.highestValidSlotLock.Unlock()
 		return
 	}
+	v.highestValidSlotLock.Unlock()
 
 	delay := slots.DivideSlotBy(3 /* a third of the slot duration */)
 	startTime := slots.StartTime(v.genesisTime, slot)
@@ -267,15 +271,15 @@ func (v *validator) waitOneThirdOrValidBlock(ctx context.Context, slot primitive
 	t := time.NewTimer(wait)
 	defer t.Stop()
 
-	ch := make(chan primitives.Slot, 1)
-	sub := v.slotFeed.Subscribe(ch)
+	bChannel := make(chan interfaces.SignedBeaconBlock, 1)
+	sub := v.blockFeed.Subscribe(bChannel)
 	defer sub.Unsubscribe()
 
 	for {
 		select {
-		case s := <-ch:
+		case b := <-bChannel:
 			if features.Get().AttestTimely {
-				if slot <= s {
+				if slot <= b.Block().Slot() {
 					return
 				}
 			}
@@ -293,14 +297,14 @@ func (v *validator) waitOneThirdOrValidBlock(ctx context.Context, slot primitive
 
 func attestationLogFields(pubKey [fieldparams.BLSPubkeyLength]byte, indexedAtt *ethpb.IndexedAttestation) logrus.Fields {
 	return logrus.Fields{
-		"pubkey":         fmt.Sprintf("%#x", pubKey),
-		"slot":           indexedAtt.Data.Slot,
-		"committeeIndex": indexedAtt.Data.CommitteeIndex,
-		"blockRoot":      fmt.Sprintf("%#x", indexedAtt.Data.BeaconBlockRoot),
-		"sourceEpoch":    indexedAtt.Data.Source.Epoch,
-		"sourceRoot":     fmt.Sprintf("%#x", indexedAtt.Data.Source.Root),
-		"targetEpoch":    indexedAtt.Data.Target.Epoch,
-		"targetRoot":     fmt.Sprintf("%#x", indexedAtt.Data.Target.Root),
-		"signature":      fmt.Sprintf("%#x", indexedAtt.Signature),
+		"attesterPublicKey": fmt.Sprintf("%#x", pubKey),
+		"attestationSlot":   indexedAtt.Data.Slot,
+		"committeeIndex":    indexedAtt.Data.CommitteeIndex,
+		"beaconBlockRoot":   fmt.Sprintf("%#x", indexedAtt.Data.BeaconBlockRoot),
+		"sourceEpoch":       indexedAtt.Data.Source.Epoch,
+		"sourceRoot":        fmt.Sprintf("%#x", indexedAtt.Data.Source.Root),
+		"targetEpoch":       indexedAtt.Data.Target.Epoch,
+		"targetRoot":        fmt.Sprintf("%#x", indexedAtt.Data.Target.Root),
+		"signature":         fmt.Sprintf("%#x", indexedAtt.Signature),
 	}
 }

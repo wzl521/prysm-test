@@ -4,19 +4,17 @@ import (
 	"context"
 	"testing"
 
-	mock "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	dbtest "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/testing"
-	doublylinkedtree "github.com/prysmaticlabs/prysm/v5/beacon-chain/forkchoice/doubly-linked-tree"
-	slashingsmock "github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/slashings/mock"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stategen"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	dbtest "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/testing"
+	slashingsmock "github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/slashings/mock"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stategen"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 	logTest "github.com/sirupsen/logrus/hooks/test"
 )
 
@@ -46,7 +44,7 @@ func TestService_processAttesterSlashings(t *testing.T) {
 		serviceCfg: &ServiceConfig{
 			Database:                slasherDB,
 			AttestationStateFetcher: mockChain,
-			StateGen:                stategen.New(beaconDB, doublylinkedtree.New()),
+			StateGen:                stategen.New(beaconDB),
 			SlashingPoolInserter:    &slashingsmock.PoolMock{},
 			HeadStateFetcher:        mockChain,
 		},
@@ -76,19 +74,14 @@ func TestService_processAttesterSlashings(t *testing.T) {
 		firstAtt.Signature = signature.Marshal()
 		secondAtt.Signature = make([]byte, 96)
 
-		slashing := &ethpb.AttesterSlashing{
-			Attestation_1: firstAtt,
-			Attestation_2: secondAtt,
+		slashings := []*ethpb.AttesterSlashing{
+			{
+				Attestation_1: firstAtt,
+				Attestation_2: secondAtt,
+			},
 		}
 
-		root, err := slashing.HashTreeRoot()
-		require.NoError(tt, err, "failed to hash tree root")
-
-		slashings := map[[fieldparams.RootLength]byte]*ethpb.AttesterSlashing{
-			root: slashing,
-		}
-
-		_, err = s.processAttesterSlashings(ctx, slashings)
+		err = s.processAttesterSlashings(ctx, slashings)
 		require.NoError(tt, err)
 		require.LogsContain(tt, hook, "Invalid signature")
 	})
@@ -100,19 +93,14 @@ func TestService_processAttesterSlashings(t *testing.T) {
 		firstAtt.Signature = make([]byte, 96)
 		secondAtt.Signature = signature.Marshal()
 
-		slashing := &ethpb.AttesterSlashing{
-			Attestation_1: firstAtt,
-			Attestation_2: secondAtt,
+		slashings := []*ethpb.AttesterSlashing{
+			{
+				Attestation_1: firstAtt,
+				Attestation_2: secondAtt,
+			},
 		}
 
-		root, err := slashing.HashTreeRoot()
-		require.NoError(tt, err, "failed to hash tree root")
-
-		slashings := map[[fieldparams.RootLength]byte]*ethpb.AttesterSlashing{
-			root: slashing,
-		}
-
-		_, err = s.processAttesterSlashings(ctx, slashings)
+		err = s.processAttesterSlashings(ctx, slashings)
 		require.NoError(tt, err)
 		require.LogsContain(tt, hook, "Invalid signature")
 	})
@@ -124,19 +112,14 @@ func TestService_processAttesterSlashings(t *testing.T) {
 		firstAtt.Signature = signature.Marshal()
 		secondAtt.Signature = signature.Marshal()
 
-		slashing := &ethpb.AttesterSlashing{
-			Attestation_1: firstAtt,
-			Attestation_2: secondAtt,
+		slashings := []*ethpb.AttesterSlashing{
+			{
+				Attestation_1: firstAtt,
+				Attestation_2: secondAtt,
+			},
 		}
 
-		root, err := slashing.HashTreeRoot()
-		require.NoError(tt, err, "failed to hash tree root")
-
-		slashings := map[[fieldparams.RootLength]byte]*ethpb.AttesterSlashing{
-			root: slashing,
-		}
-
-		_, err = s.processAttesterSlashings(ctx, slashings)
+		err = s.processAttesterSlashings(ctx, slashings)
 		require.NoError(tt, err)
 		require.LogsDoNotContain(tt, hook, "Invalid signature")
 	})
@@ -168,7 +151,7 @@ func TestService_processProposerSlashings(t *testing.T) {
 		serviceCfg: &ServiceConfig{
 			Database:                slasherDB,
 			AttestationStateFetcher: mockChain,
-			StateGen:                stategen.New(beaconDB, doublylinkedtree.New()),
+			StateGen:                stategen.New(beaconDB),
 			SlashingPoolInserter:    &slashingsmock.PoolMock{},
 			HeadStateFetcher:        mockChain,
 		},

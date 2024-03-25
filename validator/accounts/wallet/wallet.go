@@ -9,16 +9,17 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/cmd/validator/flags"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/io/file"
-	"github.com/prysmaticlabs/prysm/v5/io/prompt"
-	"github.com/prysmaticlabs/prysm/v5/validator/accounts/iface"
-	accountsprompt "github.com/prysmaticlabs/prysm/v5/validator/accounts/userprompt"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager/derived"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager/local"
-	remoteweb3signer "github.com/prysmaticlabs/prysm/v5/validator/keymanager/remote-web3signer"
+	"github.com/prysmaticlabs/prysm/v3/cmd/validator/flags"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/io/file"
+	"github.com/prysmaticlabs/prysm/v3/io/prompt"
+	"github.com/prysmaticlabs/prysm/v3/validator/accounts/iface"
+	accountsprompt "github.com/prysmaticlabs/prysm/v3/validator/accounts/userprompt"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager/derived"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager/local"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager/remote"
+	remoteweb3signer "github.com/prysmaticlabs/prysm/v3/validator/keymanager/remote-web3signer"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
@@ -54,6 +55,7 @@ var (
 	KeymanagerKindSelections = map[keymanager.Kind]string{
 		keymanager.Local:      "Imported Wallet (Recommended)",
 		keymanager.Derived:    "HD Wallet",
+		keymanager.Remote:     "Remote Signing Wallet (Advanced)",
 		keymanager.Web3Signer: "Consensys Web3Signer (Advanced)",
 	}
 	// ValidateExistingPass checks that an input cannot be empty.
@@ -143,7 +145,7 @@ func IsValid(walletDir string) (bool, error) {
 	// Count how many wallet types we have in the directory
 	numWalletTypes := 0
 	for _, name := range names {
-		// Nil error means input name is `derived` or `imported`
+		// Nil error means input name is `derived`, `remote` or `imported`
 		_, err = keymanager.ParseKind(name)
 		if err == nil {
 			numWalletTypes++
@@ -164,7 +166,6 @@ func OpenWalletOrElseCli(cliCtx *cli.Context, otherwise func(cliCtx *cli.Context
 	}
 	isValid, err := IsValid(cliCtx.String(flags.WalletDirFlag.Name))
 	if errors.Is(err, ErrNoWalletFound) {
-		// reprompts the user for a valid dir
 		return otherwise(cliCtx)
 	}
 	if err != nil {
@@ -194,68 +195,9 @@ func OpenWalletOrElseCli(cliCtx *cli.Context, otherwise func(cliCtx *cli.Context
 	})
 }
 
-// OpenOrCreateNewWallet takes a cli and returns a wallet either opening an existing valid wallet or creating a new one.
-func OpenOrCreateNewWallet(cliCtx *cli.Context) (*Wallet, error) {
-	walletDir, err := accountsprompt.InputDirectory(cliCtx, accountsprompt.WalletDirPromptText, flags.WalletDirFlag)
-	if err != nil {
-		return nil, err
-	}
-	exists, err := Exists(walletDir)
-	if err != nil {
-		return nil, errors.Wrap(err, CheckExistsErrMsg)
-	}
-	if exists {
-		isValid, err := IsValid(walletDir)
-		if err != nil {
-			return nil, errors.Wrap(err, CheckValidityErrMsg)
-		}
-		if !isValid {
-			return nil, errors.New(InvalidWalletErrMsg)
-		}
-		walletPassword, err := InputPassword(
-			cliCtx,
-			flags.WalletPasswordFileFlag,
-			PasswordPromptText,
-			false, /* Do not confirm password */
-			ValidateExistingPass,
-		)
-		if err != nil {
-			return nil, err
-		}
-		return OpenWallet(cliCtx.Context, &Config{
-			WalletDir:      walletDir,
-			WalletPassword: walletPassword,
-		})
-	}
-	// create a new wallet in the dir
-	walletPassword, err := prompt.InputPassword(
-		cliCtx,
-		flags.WalletPasswordFileFlag,
-		NewWalletPasswordPromptText,
-		ConfirmPasswordPromptText,
-		true, /* Should confirm password */
-		prompt.ValidatePasswordInput,
-	)
-	if err != nil {
-		return nil, err
-	}
-	w := New(&Config{
-		KeymanagerKind: keymanager.Local,
-		WalletDir:      walletDir,
-		WalletPassword: walletPassword,
-	})
-	if err := w.SaveWallet(); err != nil {
-		return nil, errors.Wrap(err, "could not save wallet to disk")
-	}
-	log.WithField("wallet-path", walletDir).Info(
-		"Successfully created new wallet",
-	)
-	return w, nil
-}
-
 // NewWalletForWeb3Signer returns a new wallet for web3 signer which is temporary and not stored locally.
 func NewWalletForWeb3Signer() *Wallet {
-	// wallet is just a temporary wallet for web3 signer used to call initialize keymanager.
+	// wallet is just a temporary wallet for web3 signer used to call intialize keymanager.
 	return &Wallet{
 		walletDir:      "",
 		accountsPath:   "",
@@ -345,6 +287,22 @@ func (w *Wallet) InitializeKeymanager(ctx context.Context, cfg iface.InitKeymana
 		if err != nil {
 			return nil, errors.Wrap(err, "could not initialize derived keymanager")
 		}
+	case keymanager.Remote:
+		configFile, err := w.ReadKeymanagerConfigFromDisk(ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not read keymanager config")
+		}
+		opts, err := remote.UnmarshalOptionsFile(configFile)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not unmarshal keymanager config file")
+		}
+		km, err = remote.NewKeymanager(ctx, &remote.SetupConfig{
+			Opts:           opts,
+			MaxMessageSize: 100000000,
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "could not initialize remote keymanager")
+		}
 	case keymanager.Web3Signer:
 		config := cfg.Web3SignerConfig
 		if config == nil {
@@ -366,27 +324,26 @@ func (w *Wallet) InitializeKeymanager(ctx context.Context, cfg iface.InitKeymana
 }
 
 // WriteFileAtPath within the wallet directory given the desired path, filename, and raw data.
-func (w *Wallet) WriteFileAtPath(_ context.Context, filePath, fileName string, data []byte) (bool /* exited previously */, error) {
+func (w *Wallet) WriteFileAtPath(_ context.Context, filePath, fileName string, data []byte) error {
 	accountPath := filepath.Join(w.accountsPath, filePath)
 	hasDir, err := file.HasDir(accountPath)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if !hasDir {
 		if err := file.MkdirAll(accountPath); err != nil {
-			return false, errors.Wrapf(err, "could not create path: %s", accountPath)
+			return errors.Wrapf(err, "could not create path: %s", accountPath)
 		}
 	}
 	fullPath := filepath.Join(accountPath, fileName)
-	existedPreviously := file.Exists(fullPath)
 	if err := file.WriteFile(fullPath, data); err != nil {
-		return false, errors.Wrapf(err, "could not write %s", filePath)
+		return errors.Wrapf(err, "could not write %s", filePath)
 	}
 	log.WithFields(logrus.Fields{
 		"path":     fullPath,
 		"fileName": fileName,
 	}).Debug("Wrote new file at path")
-	return existedPreviously, nil
+	return nil
 }
 
 // ReadFileAtPath within the wallet directory given the desired path and filename.
@@ -439,11 +396,12 @@ func (w *Wallet) FileNameAtPath(_ context.Context, filePath, fileName string) (s
 // for reading if it exists at the wallet path.
 func (w *Wallet) ReadKeymanagerConfigFromDisk(_ context.Context) (io.ReadCloser, error) {
 	configFilePath := filepath.Join(w.accountsPath, KeymanagerConfigFileName)
-	if !file.Exists(configFilePath) {
+	if !file.FileExists(configFilePath) {
 		return nil, fmt.Errorf("no keymanager config file found at path: %s", w.accountsPath)
 	}
 	w.configFilePath = configFilePath
 	return os.Open(configFilePath) // #nosec G304
+
 }
 
 // WriteKeymanagerConfigToDisk takes an encoded keymanager config file

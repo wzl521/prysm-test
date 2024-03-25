@@ -1,17 +1,11 @@
 package network
 
 import (
-	"context"
-	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
-	gethRPC "github.com/ethereum/go-ethereum/rpc"
-	"github.com/prysmaticlabs/prysm/v5/network/authorization"
-	log "github.com/sirupsen/logrus"
+	"github.com/prysmaticlabs/prysm/v3/network/authorization"
 )
 
 // Endpoint is an endpoint with authorization data.
@@ -22,9 +16,8 @@ type Endpoint struct {
 
 // AuthorizationData holds all information necessary to authorize with HTTP.
 type AuthorizationData struct {
-	Method authorization.Method
+	Method authorization.AuthorizationMethod
 	Value  string
-	JwtId  string
 }
 
 // Equals compares two endpoints for equality.
@@ -38,11 +31,11 @@ func (e Endpoint) HttpClient() *http.Client {
 	if e.Auth.Method != authorization.Bearer {
 		return http.DefaultClient
 	}
-	return NewHttpClientWithSecret(e.Auth.Value, e.Auth.JwtId)
+	return NewHttpClientWithSecret(e.Auth.Value)
 }
 
 // Equals compares two authorization data objects for equality.
-func (d *AuthorizationData) Equals(other AuthorizationData) bool {
+func (d AuthorizationData) Equals(other AuthorizationData) bool {
 	return d.Method == other.Method && d.Value == other.Value
 }
 
@@ -60,48 +53,8 @@ func (d *AuthorizationData) ToHeaderValue() (string, error) {
 	return "", errors.New("could not create HTTP header for unknown authorization method")
 }
 
-// HttpEndpoint extracts an httputils.Endpoint from the provider parameter.
-func HttpEndpoint(eth1Provider string) Endpoint {
-	endpoint := Endpoint{
-		Url: "",
-		Auth: AuthorizationData{
-			Method: authorization.None,
-			Value:  "",
-		}}
-
-	authValues := strings.Split(eth1Provider, ",")
-	endpoint.Url = strings.TrimSpace(authValues[0])
-	if len(authValues) > 2 {
-		log.Errorf(
-			"ETH1 endpoint string can contain one comma for specifying the authorization header to access the provider."+
-				" String contains too many commas: %d. Skipping authorization.", len(authValues)-1)
-	} else if len(authValues) == 2 {
-		switch Method(strings.TrimSpace(authValues[1])) {
-		case authorization.Basic:
-			basicAuthValues := strings.Split(strings.TrimSpace(authValues[1]), " ")
-			if len(basicAuthValues) != 2 {
-				log.Errorf("Basic Authentication has incorrect format. Skipping authorization.")
-			} else {
-				endpoint.Auth.Method = authorization.Basic
-				endpoint.Auth.Value = base64.StdEncoding.EncodeToString([]byte(basicAuthValues[1]))
-			}
-		case authorization.Bearer:
-			bearerAuthValues := strings.Split(strings.TrimSpace(authValues[1]), " ")
-			if len(bearerAuthValues) != 2 {
-				log.Errorf("Bearer Authentication has incorrect format. Skipping authorization.")
-			} else {
-				endpoint.Auth.Method = authorization.Bearer
-				endpoint.Auth.Value = bearerAuthValues[1]
-			}
-		case authorization.None:
-			log.Errorf("Authorization has incorrect format or authorization type is not supported.")
-		}
-	}
-	return endpoint
-}
-
 // Method returns the authorizationmethod.AuthorizationMethod corresponding with the parameter value.
-func Method(auth string) authorization.Method {
+func Method(auth string) authorization.AuthorizationMethod {
 	if strings.HasPrefix(strings.ToLower(auth), "basic") {
 		return authorization.Basic
 	}
@@ -113,38 +66,13 @@ func Method(auth string) authorization.Method {
 
 // NewHttpClientWithSecret returns a http client that utilizes
 // jwt authentication.
-func NewHttpClientWithSecret(secret, id string) *http.Client {
+func NewHttpClientWithSecret(secret string) *http.Client {
 	authTransport := &jwtTransport{
 		underlyingTransport: http.DefaultTransport,
 		jwtSecret:           []byte(secret),
-		jwtId:               id,
 	}
 	return &http.Client{
 		Timeout:   DefaultRPCHTTPTimeout,
 		Transport: authTransport,
 	}
-}
-
-func NewExecutionRPCClient(ctx context.Context, endpoint Endpoint, headers http.Header) (*gethRPC.Client, error) {
-	// Need to handle ipc and http
-	var client *gethRPC.Client
-	u, err := url.Parse(endpoint.Url)
-	if err != nil {
-		return nil, err
-	}
-	switch u.Scheme {
-	case "http", "https":
-		client, err = gethRPC.DialOptions(ctx, endpoint.Url, gethRPC.WithHTTPClient(endpoint.HttpClient()), gethRPC.WithHeaders(headers))
-		if err != nil {
-			return nil, err
-		}
-	case "", "ipc":
-		client, err = gethRPC.DialIPC(ctx, endpoint.Url)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("no known transport for URL scheme %q", u.Scheme)
-	}
-	return client, nil
 }

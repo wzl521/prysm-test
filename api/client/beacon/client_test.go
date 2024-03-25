@@ -4,8 +4,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/api/client"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func TestParseNodeVersion(t *testing.T) {
@@ -18,17 +17,17 @@ func TestParseNodeVersion(t *testing.T) {
 		{
 			name: "empty string",
 			v:    "",
-			err:  client.ErrInvalidNodeVersion,
+			err:  ErrInvalidNodeVersion,
 		},
 		{
 			name: "Prysm as the version string",
 			v:    "Prysm",
-			err:  client.ErrInvalidNodeVersion,
+			err:  ErrInvalidNodeVersion,
 		},
 		{
 			name: "semver only",
 			v:    "v2.0.6",
-			err:  client.ErrInvalidNodeVersion,
+			err:  ErrInvalidNodeVersion,
 		},
 		{
 			name: "complete version",
@@ -92,7 +91,7 @@ func TestValidHostname(t *testing.T) {
 		{
 			name:    "hostname without port",
 			hostArg: "mydomain.org",
-			err:     client.ErrMalformedHostname,
+			err:     ErrMalformedHostname,
 		},
 		{
 			name:    "hostname with port",
@@ -133,7 +132,7 @@ func TestValidHostname(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			require.Equal(t, c.joined, cl.BaseURL().ResolveReference(&url.URL{Path: c.path}).String())
+			require.Equal(t, c.joined, cl.baseURL.ResolveReference(&url.URL{Path: c.path}).String())
 		})
 	}
 }

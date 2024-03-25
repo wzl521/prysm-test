@@ -4,22 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/google/uuid"
 	"github.com/logrusorgru/aurora"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/async/event"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	validatorpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/validator-client"
-	"github.com/prysmaticlabs/prysm/v5/runtime/interop"
-	"github.com/prysmaticlabs/prysm/v5/validator/accounts/iface"
-	"github.com/prysmaticlabs/prysm/v5/validator/accounts/petnames"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
+	"github.com/prysmaticlabs/prysm/v3/async/event"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	validatorpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/validator-client"
+	"github.com/prysmaticlabs/prysm/v3/runtime/interop"
+	"github.com/prysmaticlabs/prysm/v3/validator/accounts/iface"
+	"github.com/prysmaticlabs/prysm/v3/validator/accounts/petnames"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager"
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
 	"go.opencensus.io/trace"
 )
@@ -58,14 +57,6 @@ type SetupConfig struct {
 type accountStore struct {
 	PrivateKeys [][]byte `json:"private_keys"`
 	PublicKeys  [][]byte `json:"public_keys"`
-}
-
-// Copy creates a deep copy of accountStore
-func (a *accountStore) Copy() *accountStore {
-	storeCopy := &accountStore{}
-	storeCopy.PrivateKeys = bytesutil.SafeCopy2dBytes(a.PrivateKeys)
-	storeCopy.PublicKeys = bytesutil.SafeCopy2dBytes(a.PublicKeys)
-	return storeCopy
 }
 
 // AccountsKeystoreRepresentation defines an internal Prysm representation
@@ -177,7 +168,7 @@ func (km *Keymanager) initializeKeysCachesFromKeystore() error {
 
 // FetchValidatingPublicKeys fetches the list of active public keys from the local account keystores.
 func (_ *Keymanager) FetchValidatingPublicKeys(ctx context.Context) ([][fieldparams.BLSPubkeyLength]byte, error) {
-	_, span := trace.StartSpan(ctx, "keymanager.FetchValidatingPublicKeys")
+	ctx, span := trace.StartSpan(ctx, "keymanager.FetchValidatingPublicKeys")
 	defer span.End()
 
 	lock.RLock()
@@ -209,6 +200,9 @@ func (km *Keymanager) FetchValidatingPrivateKeys(ctx context.Context) ([][32]byt
 
 // Sign signs a message using a validator key.
 func (_ *Keymanager) Sign(ctx context.Context, req *validatorpb.SignRequest) (bls.Signature, error) {
+	ctx, span := trace.StartSpan(ctx, "keymanager.Sign")
+	defer span.End()
+
 	publicKey := req.PublicKey
 	if publicKey == nil {
 		return nil, errors.New("nil public key in request")
@@ -265,88 +259,17 @@ func (km *Keymanager) initializeAccountKeystore(ctx context.Context) error {
 }
 
 // CreateAccountsKeystore creates a new keystore holding the provided keys.
-func (km *Keymanager) CreateAccountsKeystore(ctx context.Context, privateKeys [][]byte, publicKeys [][]byte) (*AccountsKeystoreRepresentation, error) {
-	if err := km.CreateOrUpdateInMemoryAccountsStore(ctx, privateKeys, publicKeys); err != nil {
-		return nil, err
-	}
-	return CreateAccountsKeystoreRepresentation(ctx, km.accountsStore, km.wallet.Password())
-}
-
-// SaveStoreAndReInitialize saves the store to disk and re-initializes the account keystore from file
-func (km *Keymanager) SaveStoreAndReInitialize(ctx context.Context, store *accountStore) error {
-	// Save the copy to disk
-	accountsKeystore, err := CreateAccountsKeystoreRepresentation(ctx, store, km.wallet.Password())
-	if err != nil {
-		return err
-	}
-	encodedAccounts, err := json.MarshalIndent(accountsKeystore, "", "\t")
-	if err != nil {
-		return err
-	}
-
-	existedPreviously, err := km.wallet.WriteFileAtPath(ctx, AccountsPath, AccountsKeystoreFileName, encodedAccounts)
-	if err != nil {
-		return err
-	}
-
-	if existedPreviously {
-		// Reinitialize account store and cache
-		// This will update the in-memory information instead of reading from the file itself for safety concerns
-		km.accountsStore = store
-		err = km.initializeKeysCachesFromKeystore()
-		if err != nil {
-			return errors.Wrap(err, "failed to initialize keys caches")
-		}
-
-		return nil
-	}
-
-	// manually reload the account from the keystore the first time
-	km.reloadAccountsFromKeystoreFile(filepath.Join(km.wallet.AccountsDir(), AccountsPath, AccountsKeystoreFileName))
-	// listen to account changes of the new file
-	go km.listenForAccountChanges(ctx)
-	return nil
-}
-
-// CreateAccountsKeystoreRepresentation is a pure function that takes an accountStore and wallet password and returns the encrypted formatted json version for local writing.
-func CreateAccountsKeystoreRepresentation(
+func (km *Keymanager) CreateAccountsKeystore(
 	_ context.Context,
-	store *accountStore,
-	walletPW string,
+	privateKeys, publicKeys [][]byte,
 ) (*AccountsKeystoreRepresentation, error) {
 	encryptor := keystorev4.New()
 	id, err := uuid.NewRandom()
 	if err != nil {
 		return nil, err
 	}
-	encodedStore, err := json.MarshalIndent(store, "", "\t")
-	if err != nil {
-		return nil, err
-	}
-	cryptoFields, err := encryptor.Encrypt(encodedStore, walletPW)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not encrypt accounts")
-	}
-	return &AccountsKeystoreRepresentation{
-		Crypto:  cryptoFields,
-		ID:      id.String(),
-		Version: encryptor.Version(),
-		Name:    encryptor.Name(),
-	}, nil
-}
-
-// CreateEmptyKeyStoreRepresentationForNewWallet creates a placeholder accounts keystore for a new Prysm Local Wallet.
-func CreateEmptyKeyStoreRepresentationForNewWallet(ctx context.Context, walletPassword string) (*AccountsKeystoreRepresentation, error) {
-	// make sure everything is clean when creating this.
-	ResetCaches()
-	return CreateAccountsKeystoreRepresentation(ctx, &accountStore{}, walletPassword)
-}
-
-// CreateOrUpdateInMemoryAccountsStore will set or update the local accounts store and update the local cache.
-// This function DOES NOT save the accounts store to disk.
-func (km *Keymanager) CreateOrUpdateInMemoryAccountsStore(_ context.Context, privateKeys, publicKeys [][]byte) error {
 	if len(privateKeys) != len(publicKeys) {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"number of private keys and public keys is not equal: %d != %d", len(privateKeys), len(publicKeys),
 		)
 	}
@@ -356,35 +279,44 @@ func (km *Keymanager) CreateOrUpdateInMemoryAccountsStore(_ context.Context, pri
 			PublicKeys:  publicKeys,
 		}
 	} else {
-		updateAccountsStoreKeys(km.accountsStore, privateKeys, publicKeys)
-	}
-	err := km.initializeKeysCachesFromKeystore()
-	if err != nil {
-		return errors.Wrap(err, "failed to initialize keys caches")
-	}
-	return nil
-}
-
-func updateAccountsStoreKeys(store *accountStore, privateKeys, publicKeys [][]byte) {
-	existingPubKeys := make(map[string]bool)
-	existingPrivKeys := make(map[string]bool)
-	for i := 0; i < len(store.PrivateKeys); i++ {
-		existingPrivKeys[string(store.PrivateKeys[i])] = true
-		existingPubKeys[string(store.PublicKeys[i])] = true
-	}
-	// We append to the accounts store keys only
-	// if the private/secret key do not already exist, to prevent duplicates.
-	for i := 0; i < len(privateKeys); i++ {
-		sk := privateKeys[i]
-		pk := publicKeys[i]
-		_, privKeyExists := existingPrivKeys[string(sk)]
-		_, pubKeyExists := existingPubKeys[string(pk)]
-		if privKeyExists || pubKeyExists {
-			continue
+		existingPubKeys := make(map[string]bool)
+		existingPrivKeys := make(map[string]bool)
+		for i := 0; i < len(km.accountsStore.PrivateKeys); i++ {
+			existingPrivKeys[string(km.accountsStore.PrivateKeys[i])] = true
+			existingPubKeys[string(km.accountsStore.PublicKeys[i])] = true
 		}
-		store.PublicKeys = append(store.PublicKeys, pk)
-		store.PrivateKeys = append(store.PrivateKeys, sk)
+		// We append to the accounts store keys only
+		// if the private/secret key do not already exist, to prevent duplicates.
+		for i := 0; i < len(privateKeys); i++ {
+			sk := privateKeys[i]
+			pk := publicKeys[i]
+			_, privKeyExists := existingPrivKeys[string(sk)]
+			_, pubKeyExists := existingPubKeys[string(pk)]
+			if privKeyExists || pubKeyExists {
+				continue
+			}
+			km.accountsStore.PublicKeys = append(km.accountsStore.PublicKeys, pk)
+			km.accountsStore.PrivateKeys = append(km.accountsStore.PrivateKeys, sk)
+		}
 	}
+	err = km.initializeKeysCachesFromKeystore()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to initialize keys caches")
+	}
+	encodedStore, err := json.MarshalIndent(km.accountsStore, "", "\t")
+	if err != nil {
+		return nil, err
+	}
+	cryptoFields, err := encryptor.Encrypt(encodedStore, km.wallet.Password())
+	if err != nil {
+		return nil, errors.Wrap(err, "could not encrypt accounts")
+	}
+	return &AccountsKeystoreRepresentation{
+		Crypto:  cryptoFields,
+		ID:      id.String(),
+		Version: encryptor.Version(),
+		Name:    encryptor.Name(),
+	}, nil
 }
 
 func (km *Keymanager) ListKeymanagerAccounts(ctx context.Context, cfg keymanager.ListKeymanagerAccountConfig) error {
@@ -427,18 +359,16 @@ func (km *Keymanager) ListKeymanagerAccounts(ctx context.Context, cfg keymanager
 				fmt.Printf("%s %#x\n", au.BrightRed("[validating private key]").Bold(), privateKeys[i])
 			}
 		}
+		if !cfg.ShowDepositData {
+			continue
+		}
+		fmt.Printf(
+			"%s\n",
+			au.BrightRed("If you imported your account coming from the eth2 launchpad, you will find your "+
+				"deposit_data.json in the eth2.0-deposit-cli's validator_keys folder"),
+		)
+		fmt.Println("")
 	}
 	fmt.Println("")
 	return nil
-}
-
-func CreatePrintoutOfKeys(keys [][]byte) string {
-	var keysStr string
-	for i, k := range keys {
-		if i != 0 {
-			keysStr += "," // Add a comma before each key except the first one
-		}
-		keysStr += fmt.Sprintf("%#x", bytesutil.Trunc(k))
-	}
-	return keysStr
 }

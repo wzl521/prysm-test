@@ -3,11 +3,11 @@ package validator
 import (
 	"context"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/blocks"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed"
-	opfeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/operation"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/blocks"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	opfeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/operation"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -17,7 +17,7 @@ func (vs *Server) ProposeExit(ctx context.Context, req *ethpb.SignedVoluntaryExi
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
-	s, err := vs.HeadFetcher.HeadStateReadOnly(ctx)
+	s, err := vs.HeadFetcher.HeadState(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not get head state: %v", err)
 	}
@@ -34,7 +34,7 @@ func (vs *Server) ProposeExit(ctx context.Context, req *ethpb.SignedVoluntaryExi
 		return nil, status.Error(codes.InvalidArgument, "validator index exceeds validator set length")
 	}
 
-	if err := blocks.VerifyExitAndSignature(val, s, req); err != nil {
+	if err := blocks.VerifyExitAndSignature(val, s.Slot(), s.Fork(), req, s.GenesisValidatorsRoot()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
@@ -45,7 +45,7 @@ func (vs *Server) ProposeExit(ctx context.Context, req *ethpb.SignedVoluntaryExi
 		},
 	})
 
-	vs.ExitPool.InsertVoluntaryExit(req)
+	vs.ExitPool.InsertVoluntaryExit(ctx, s, req)
 
 	r, err := req.Exit.HashTreeRoot()
 	if err != nil {

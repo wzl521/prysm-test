@@ -2,23 +2,24 @@ package sync
 
 import (
 	"context"
+	"encoding/hex"
 
-	libp2pcore "github.com/libp2p/go-libp2p/core"
-	"github.com/libp2p/go-libp2p/core/peer"
+	libp2pcore "github.com/libp2p/go-libp2p-core"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/types"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/wrapper"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/network/forks"
-	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/metadata"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/types"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/wrapper"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/network/forks"
+	pb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/metadata"
+	"github.com/prysmaticlabs/prysm/v3/runtime/version"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 )
 
 // metaDataHandler reads the incoming metadata rpc request from the peer.
@@ -89,7 +90,7 @@ func (s *Service) sendMetaDataRequest(ctx context.Context, id peer.ID) (metadata
 	ctx, cancel := context.WithTimeout(ctx, respTimeout)
 	defer cancel()
 
-	topic, err := p2p.TopicFromMessage(p2p.MetadataMessageName, slots.ToEpoch(s.cfg.clock.CurrentSlot()))
+	topic, err := p2p.TopicFromMessage(p2p.MetadataMessageName, slots.ToEpoch(s.cfg.chain.CurrentSlot()))
 	if err != nil {
 		return nil, err
 	}
@@ -107,12 +108,14 @@ func (s *Service) sendMetaDataRequest(ctx context.Context, id peer.ID) (metadata
 		s.cfg.p2p.Peers().Scorers().BadResponsesScorer().Increment(stream.Conn().RemotePeer())
 		return nil, errors.New(errMsg)
 	}
-	valRoot := s.cfg.clock.GenesisValidatorsRoot()
-	rpcCtx, err := forks.ForkDigestFromEpoch(slots.ToEpoch(s.cfg.clock.CurrentSlot()), valRoot[:])
+	valRoot := s.cfg.chain.GenesisValidatorsRoot()
+	rpcCtx, err := forks.ForkDigestFromEpoch(slots.ToEpoch(s.cfg.chain.CurrentSlot()), valRoot[:])
 	if err != nil {
 		return nil, err
 	}
-	msg, err := extractMetaDataType(rpcCtx[:], s.cfg.clock)
+
+	log.Infof("valroot: %s digest: %s", hex.EncodeToString(valRoot[:]), hex.EncodeToString(rpcCtx[:]))
+	msg, err := extractMetaDataType(rpcCtx[:], s.cfg.chain)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +137,7 @@ func (s *Service) sendMetaDataRequest(ctx context.Context, id peer.ID) (metadata
 	return msg, nil
 }
 
-func extractMetaDataType(digest []byte, tor blockchain.TemporalOracle) (metadata.Metadata, error) {
+func extractMetaDataType(digest []byte, chain blockchain.ChainInfoFetcher) (metadata.Metadata, error) {
 	if len(digest) == 0 {
 		mdFunc, ok := types.MetaDataMap[bytesutil.ToBytes4(params.BeaconConfig().GenesisForkVersion)]
 		if !ok {
@@ -145,7 +148,7 @@ func extractMetaDataType(digest []byte, tor blockchain.TemporalOracle) (metadata
 	if len(digest) != forkDigestLength {
 		return nil, errors.Errorf("invalid digest returned, wanted a length of %d but received %d", forkDigestLength, len(digest))
 	}
-	vRoot := tor.GenesisValidatorsRoot()
+	vRoot := chain.GenesisValidatorsRoot()
 	for k, mdFunc := range types.MetaDataMap {
 		rDigest, err := signing.ComputeForkDigest(k[:], vRoot[:])
 		if err != nil {
@@ -155,5 +158,5 @@ func extractMetaDataType(digest []byte, tor blockchain.TemporalOracle) (metadata
 			return mdFunc(), nil
 		}
 	}
-	return nil, errors.Wrapf(ErrNoValidDigest, "could not extract metadata type, saw digest=%#x, genesis=%v, vr=%#x", digest, tor.GenesisTime(), tor.GenesisValidatorsRoot())
+	return nil, errors.New("no valid digest matched")
 }

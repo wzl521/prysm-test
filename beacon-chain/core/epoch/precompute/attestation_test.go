@@ -5,15 +5,15 @@ import (
 	"testing"
 
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/epoch/precompute"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/attestation"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/epoch/precompute"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/attestation"
+	"github.com/prysmaticlabs/prysm/v3/runtime/version"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
 func TestUpdateValidator_Works(t *testing.T) {
@@ -70,7 +70,7 @@ func TestUpdateBalance(t *testing.T) {
 	assert.DeepEqual(t, wantedPBal, pBal, "Incorrect balance calculations")
 }
 
-func TestUpdateBalanceDifferentVersions(t *testing.T) {
+func TestUpdateBalanceBellatrixVersion(t *testing.T) {
 	vp := []*precompute.Validator{
 		{IsCurrentEpochAttester: true, CurrentEpochEffectiveBalance: 100 * params.BeaconConfig().EffectiveBalanceIncrement},
 		{IsCurrentEpochTargetAttester: true, IsCurrentEpochAttester: true, CurrentEpochEffectiveBalance: 100 * params.BeaconConfig().EffectiveBalanceIncrement},
@@ -91,9 +91,6 @@ func TestUpdateBalanceDifferentVersions(t *testing.T) {
 		PrevEpochHeadAttested:      200 * params.BeaconConfig().EffectiveBalanceIncrement,
 	}
 	pBal := precompute.UpdateBalance(vp, &precompute.Balance{}, version.Bellatrix)
-	assert.DeepEqual(t, wantedPBal, pBal, "Incorrect balance calculations")
-
-	pBal = precompute.UpdateBalance(vp, &precompute.Balance{}, version.Capella)
 	assert.DeepEqual(t, wantedPBal, pBal, "Incorrect balance calculations")
 }
 

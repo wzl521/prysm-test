@@ -11,30 +11,33 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/async/event"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	validatorpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/validator-client"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
+	"github.com/prysmaticlabs/prysm/v3/async/event"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	validatorpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/validator-client"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
 	logTest "github.com/sirupsen/logrus/hooks/test"
+	"google.golang.org/grpc"
 	"gopkg.in/d4l3k/messagediff.v1"
 )
 
 func TestRequestAttestation_ValidatorDutiesRequestFailure(t *testing.T) {
 	hook := logTest.NewGlobal()
 	validator, _, validatorKey, finish := setup(t)
-	validator.duties = &ethpb.DutiesResponse{CurrentEpochDuties: []*ethpb.DutiesResponse_Duty{}}
+	validator.duties = &ethpb.DutiesResponse{Duties: []*ethpb.DutiesResponse_Duty{}}
 	defer finish()
 
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
 	validator.SubmitAttestation(context.Background(), 30, pubKey)
 	require.LogsContain(t, hook, "Could not fetch validator assignment")
@@ -45,13 +48,13 @@ func TestAttestToBlockHead_SubmitAttestation_EmptyCommittee(t *testing.T) {
 
 	validator, _, validatorKey, finish := setup(t)
 	defer finish()
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
-	validator.duties = &ethpb.DutiesResponse{CurrentEpochDuties: []*ethpb.DutiesResponse_Duty{
+	validator.duties = &ethpb.DutiesResponse{Duties: []*ethpb.DutiesResponse_Duty{
 		{
 			PublicKey:      validatorKey.PublicKey().Marshal(),
 			CommitteeIndex: 0,
-			Committee:      make([]primitives.ValidatorIndex, 0),
+			Committee:      make([]types.ValidatorIndex, 0),
 			ValidatorIndex: 0,
 		}}}
 	validator.SubmitAttestation(context.Background(), 0, pubKey)
@@ -63,11 +66,11 @@ func TestAttestToBlockHead_SubmitAttestation_RequestFailure(t *testing.T) {
 
 	validator, m, validatorKey, finish := setup(t)
 	defer finish()
-	validator.duties = &ethpb.DutiesResponse{CurrentEpochDuties: []*ethpb.DutiesResponse_Duty{
+	validator.duties = &ethpb.DutiesResponse{Duties: []*ethpb.DutiesResponse_Duty{
 		{
 			PublicKey:      validatorKey.PublicKey().Marshal(),
 			CommitteeIndex: 5,
-			Committee:      make([]primitives.ValidatorIndex, 111),
+			Committee:      make([]types.ValidatorIndex, 111),
 			ValidatorIndex: 0,
 		}}}
 	m.validatorClient.EXPECT().GetAttestationData(
@@ -87,7 +90,7 @@ func TestAttestToBlockHead_SubmitAttestation_RequestFailure(t *testing.T) {
 		gomock.AssignableToTypeOf(&ethpb.Attestation{}),
 	).Return(nil, errors.New("something went wrong"))
 
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
 	validator.SubmitAttestation(context.Background(), 30, pubKey)
 	require.LogsContain(t, hook, "Could not submit attestation to beacon node")
@@ -97,11 +100,11 @@ func TestAttestToBlockHead_AttestsCorrectly(t *testing.T) {
 	validator, m, validatorKey, finish := setup(t)
 	defer finish()
 	hook := logTest.NewGlobal()
-	validatorIndex := primitives.ValidatorIndex(7)
-	committee := []primitives.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	validatorIndex := types.ValidatorIndex(7)
+	committee := []types.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
-	validator.duties = &ethpb.DutiesResponse{CurrentEpochDuties: []*ethpb.DutiesResponse_Duty{
+	validator.duties = &ethpb.DutiesResponse{Duties: []*ethpb.DutiesResponse_Duty{
 		{
 			PublicKey:      validatorKey.PublicKey().Marshal(),
 			CommitteeIndex: 5,
@@ -131,7 +134,7 @@ func TestAttestToBlockHead_AttestsCorrectly(t *testing.T) {
 	m.validatorClient.EXPECT().ProposeAttestation(
 		gomock.Any(), // ctx
 		gomock.AssignableToTypeOf(&ethpb.Attestation{}),
-	).Do(func(_ context.Context, att *ethpb.Attestation) {
+	).Do(func(_ context.Context, att *ethpb.Attestation, opts ...grpc.CallOption) {
 		generatedAttestation = att
 	}).Return(&ethpb.AttestResponse{}, nil /* error */)
 
@@ -170,11 +173,11 @@ func TestAttestToBlockHead_BlocksDoubleAtt(t *testing.T) {
 	hook := logTest.NewGlobal()
 	validator, m, validatorKey, finish := setup(t)
 	defer finish()
-	validatorIndex := primitives.ValidatorIndex(7)
-	committee := []primitives.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	validatorIndex := types.ValidatorIndex(7)
+	committee := []types.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
-	validator.duties = &ethpb.DutiesResponse{CurrentEpochDuties: []*ethpb.DutiesResponse_Duty{
+	validator.duties = &ethpb.DutiesResponse{Duties: []*ethpb.DutiesResponse_Duty{
 		{
 			PublicKey:      validatorKey.PublicKey().Marshal(),
 			CommitteeIndex: 5,
@@ -222,11 +225,11 @@ func TestAttestToBlockHead_BlocksSurroundAtt(t *testing.T) {
 	hook := logTest.NewGlobal()
 	validator, m, validatorKey, finish := setup(t)
 	defer finish()
-	validatorIndex := primitives.ValidatorIndex(7)
-	committee := []primitives.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	validatorIndex := types.ValidatorIndex(7)
+	committee := []types.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
-	validator.duties = &ethpb.DutiesResponse{CurrentEpochDuties: []*ethpb.DutiesResponse_Duty{
+	validator.duties = &ethpb.DutiesResponse{Duties: []*ethpb.DutiesResponse_Duty{
 		{
 			PublicKey:      validatorKey.PublicKey().Marshal(),
 			CommitteeIndex: 5,
@@ -274,11 +277,11 @@ func TestAttestToBlockHead_BlocksSurroundedAtt(t *testing.T) {
 	hook := logTest.NewGlobal()
 	validator, m, validatorKey, finish := setup(t)
 	defer finish()
-	validatorIndex := primitives.ValidatorIndex(7)
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	validatorIndex := types.ValidatorIndex(7)
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
-	committee := []primitives.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
-	validator.duties = &ethpb.DutiesResponse{CurrentEpochDuties: []*ethpb.DutiesResponse_Duty{
+	committee := []types.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
+	validator.duties = &ethpb.DutiesResponse{Duties: []*ethpb.DutiesResponse_Duty{
 		{
 			PublicKey:      validatorKey.PublicKey().Marshal(),
 			CommitteeIndex: 5,
@@ -329,12 +332,13 @@ func TestAttestToBlockHead_DoesNotAttestBeforeDelay(t *testing.T) {
 	validator, m, validatorKey, finish := setup(t)
 	defer finish()
 
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
 	validator.genesisTime = uint64(prysmTime.Now().Unix())
 	m.validatorClient.EXPECT().GetDuties(
 		gomock.Any(), // ctx
 		gomock.AssignableToTypeOf(&ethpb.DutiesRequest{}),
+		gomock.Any(),
 	).Times(0)
 
 	m.validatorClient.EXPECT().GetAttestationData(
@@ -361,11 +365,11 @@ func TestAttestToBlockHead_DoesAttestAfterDelay(t *testing.T) {
 	defer wg.Wait()
 
 	validator.genesisTime = uint64(prysmTime.Now().Unix())
-	validatorIndex := primitives.ValidatorIndex(5)
-	committee := []primitives.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	validatorIndex := types.ValidatorIndex(5)
+	committee := []types.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
-	validator.duties = &ethpb.DutiesResponse{CurrentEpochDuties: []*ethpb.DutiesResponse_Duty{
+	validator.duties = &ethpb.DutiesResponse{Duties: []*ethpb.DutiesResponse_Duty{
 		{
 			PublicKey:      validatorKey.PublicKey().Marshal(),
 			CommitteeIndex: 5,
@@ -380,7 +384,7 @@ func TestAttestToBlockHead_DoesAttestAfterDelay(t *testing.T) {
 		BeaconBlockRoot: bytesutil.PadTo([]byte("A"), 32),
 		Target:          &ethpb.Checkpoint{Root: bytesutil.PadTo([]byte("B"), 32)},
 		Source:          &ethpb.Checkpoint{Root: bytesutil.PadTo([]byte("C"), 32), Epoch: 3},
-	}, nil).Do(func(arg0, arg1 interface{}) {
+	}, nil).Do(func(arg0, arg1 interface{}, arg2 ...grpc.CallOption) {
 		wg.Done()
 	})
 
@@ -400,11 +404,11 @@ func TestAttestToBlockHead_DoesAttestAfterDelay(t *testing.T) {
 func TestAttestToBlockHead_CorrectBitfieldLength(t *testing.T) {
 	validator, m, validatorKey, finish := setup(t)
 	defer finish()
-	validatorIndex := primitives.ValidatorIndex(2)
-	committee := []primitives.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
-	var pubKey [fieldparams.BLSPubkeyLength]byte
+	validatorIndex := types.ValidatorIndex(2)
+	committee := []types.ValidatorIndex{0, 3, 4, 2, validatorIndex, 6, 8, 9, 10}
+	pubKey := [fieldparams.BLSPubkeyLength]byte{}
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
-	validator.duties = &ethpb.DutiesResponse{CurrentEpochDuties: []*ethpb.DutiesResponse_Duty{
+	validator.duties = &ethpb.DutiesResponse{Duties: []*ethpb.DutiesResponse_Duty{
 		{
 			PublicKey:      validatorKey.PublicKey().Marshal(),
 			CommitteeIndex: 5,
@@ -429,7 +433,7 @@ func TestAttestToBlockHead_CorrectBitfieldLength(t *testing.T) {
 	m.validatorClient.EXPECT().ProposeAttestation(
 		gomock.Any(), // ctx
 		gomock.AssignableToTypeOf(&ethpb.Attestation{}),
-	).Do(func(_ context.Context, att *ethpb.Attestation) {
+	).Do(func(_ context.Context, att *ethpb.Attestation, arg2 ...grpc.CallOption) {
 		generatedAttestation = att
 	}).Return(&ethpb.AttestResponse{}, nil /* error */)
 
@@ -442,6 +446,9 @@ func TestSignAttestation(t *testing.T) {
 	validator, m, _, finish := setup(t)
 	defer finish()
 
+	secretKey, err := bls.SecretKeyFromBytes(bytesutil.PadTo([]byte{1}, 32))
+	require.NoError(t, err, "Failed to generate key from bytes")
+	publicKey := secretKey.PublicKey()
 	wantedFork := &ethpb.Fork{
 		PreviousVersion: []byte{'a', 'b', 'c', 'd'},
 		CurrentVersion:  []byte{'d', 'e', 'f', 'f'},
@@ -459,10 +466,15 @@ func TestSignAttestation(t *testing.T) {
 	att.Data.Target.Epoch = 200
 	att.Data.Slot = 999
 	att.Data.BeaconBlockRoot = bytesutil.PadTo([]byte("blockRoot"), 32)
-
-	pk := testKeyFromBytes(t, []byte{1})
-	validator.keyManager = newMockKeymanager(t, pk)
-	sig, sr, err := validator.signAtt(ctx, pk.pub, att.Data, att.Data.Slot)
+	var pubKey [fieldparams.BLSPubkeyLength]byte
+	copy(pubKey[:], publicKey.Marshal())
+	km := &mockKeymanager{
+		keysMap: map[[fieldparams.BLSPubkeyLength]byte]bls.SecretKey{
+			pubKey: secretKey,
+		},
+	}
+	validator.keyManager = km
+	sig, sr, err := validator.signAtt(ctx, pubKey, att.Data, att.Data.Slot)
 	require.NoError(t, err, "%x,%x,%v", sig, sr, err)
 	require.Equal(t, "b6a60f8497bd328908be83634d045"+
 		"dd7a32f5e246b2c4031fc2f316983f362e36fc27fd3d6d5a2b15"+
@@ -476,12 +488,12 @@ func TestSignAttestation(t *testing.T) {
 
 func TestServer_WaitToSlotOneThird_CanWait(t *testing.T) {
 	currentTime := uint64(time.Now().Unix())
-	currentSlot := primitives.Slot(4)
+	currentSlot := types.Slot(4)
 	genesisTime := currentTime - uint64(currentSlot.Mul(params.BeaconConfig().SecondsPerSlot))
 
 	v := &validator{
 		genesisTime: genesisTime,
-		slotFeed:    new(event.Feed),
+		blockFeed:   new(event.Feed),
 	}
 
 	timeToSleep := params.BeaconConfig().SecondsPerSlot / 3
@@ -495,12 +507,12 @@ func TestServer_WaitToSlotOneThird_CanWait(t *testing.T) {
 
 func TestServer_WaitToSlotOneThird_SameReqSlot(t *testing.T) {
 	currentTime := uint64(time.Now().Unix())
-	currentSlot := primitives.Slot(4)
+	currentSlot := types.Slot(4)
 	genesisTime := currentTime - uint64(currentSlot.Mul(params.BeaconConfig().SecondsPerSlot))
 
 	v := &validator{
 		genesisTime:      genesisTime,
-		slotFeed:         new(event.Feed),
+		blockFeed:        new(event.Feed),
 		highestValidSlot: currentSlot,
 	}
 
@@ -516,19 +528,24 @@ func TestServer_WaitToSlotOneThird_ReceiveBlockSlot(t *testing.T) {
 	defer resetCfg()
 
 	currentTime := uint64(time.Now().Unix())
-	currentSlot := primitives.Slot(4)
+	currentSlot := types.Slot(4)
 	genesisTime := currentTime - uint64(currentSlot.Mul(params.BeaconConfig().SecondsPerSlot))
 
 	v := &validator{
 		genesisTime: genesisTime,
-		slotFeed:    new(event.Feed),
+		blockFeed:   new(event.Feed),
 	}
 
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		v.slotFeed.Send(currentSlot)
+		wsb, err := blocks.NewSignedBeaconBlock(
+			&ethpb.SignedBeaconBlock{
+				Block: &ethpb.BeaconBlock{Slot: currentSlot, Body: &ethpb.BeaconBlockBody{}},
+			})
+		require.NoError(t, err)
+		v.blockFeed.Send(wsb)
 		wg.Done()
 	}()
 

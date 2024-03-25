@@ -3,25 +3,26 @@ package sync
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"sync"
 	"time"
 
-	libp2pcore "github.com/libp2p/go-libp2p/core"
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
+	libp2pcore "github.com/libp2p/go-libp2p-core"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/async"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers"
-	p2ptypes "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/types"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/flags"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/async"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/peers"
+	p2ptypes "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/types"
+	"github.com/prysmaticlabs/prysm/v3/cmd/beacon-chain/flags"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	pb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	"github.com/sirupsen/logrus"
 )
 
@@ -93,7 +94,7 @@ func (s *Service) resyncIfBehind() {
 			// Check if the current node is more than 1 epoch behind.
 			if highestEpoch > (syncedEpoch + 1) {
 				log.WithFields(logrus.Fields{
-					"currentEpoch": slots.ToEpoch(s.cfg.clock.CurrentSlot()),
+					"currentEpoch": slots.ToEpoch(s.cfg.chain.CurrentSlot()),
 					"syncedEpoch":  syncedEpoch,
 					"peersEpoch":   highestEpoch,
 				}).Info("Fallen behind peers; reverting to initial sync to catch up")
@@ -110,8 +111,8 @@ func (s *Service) resyncIfBehind() {
 // shouldReSync returns true if the node is not syncing and falls behind two epochs.
 func (s *Service) shouldReSync() bool {
 	syncedEpoch := slots.ToEpoch(s.cfg.chain.HeadSlot())
-	currentEpoch := slots.ToEpoch(s.cfg.clock.CurrentSlot())
-	prevEpoch := primitives.Epoch(0)
+	currentEpoch := slots.ToEpoch(s.cfg.chain.CurrentSlot())
+	prevEpoch := types.Epoch(0)
 	if currentEpoch > 1 {
 		prevEpoch = currentEpoch - 1
 	}
@@ -140,7 +141,10 @@ func (s *Service) sendRPCStatusRequest(ctx context.Context, id peer.ID) error {
 		HeadRoot:       headRoot,
 		HeadSlot:       s.cfg.chain.HeadSlot(),
 	}
-	topic, err := p2p.TopicFromMessage(p2p.StatusMessageName, slots.ToEpoch(s.cfg.clock.CurrentSlot()))
+	log.Infof("sent status: (fg: %s, fr: %s, hr: %s, fe: %d, hs: %d) to %s",
+		hex.EncodeToString(resp.ForkDigest), hex.EncodeToString(resp.FinalizedRoot), hex.EncodeToString(resp.HeadRoot),
+		resp.FinalizedEpoch, resp.HeadSlot, id.String())
+	topic, err := p2p.TopicFromMessage(p2p.StatusMessageName, slots.ToEpoch(s.cfg.chain.CurrentSlot()))
 	if err != nil {
 		return err
 	}
@@ -165,6 +169,8 @@ func (s *Service) sendRPCStatusRequest(ctx context.Context, id peer.ID) error {
 		s.cfg.p2p.Peers().Scorers().BadResponsesScorer().Increment(stream.Conn().RemotePeer())
 		return err
 	}
+	log.Infof("get response status: (fg: %s, fr: %s, hr: %s, fe: %d, hs: %d) to %s", hex.EncodeToString(msg.ForkDigest), hex.EncodeToString(msg.FinalizedRoot), hex.EncodeToString(msg.HeadRoot),
+		msg.FinalizedEpoch, msg.HeadSlot, id.String())
 
 	// If validation fails, validation error is logged, and peer status scorer will mark peer as bad.
 	err = s.validateStatusMessage(ctx, msg)
@@ -181,7 +187,7 @@ func (s *Service) reValidatePeer(ctx context.Context, id peer.ID) error {
 		return err
 	}
 	// Do not return an error for ping requests.
-	if err := s.sendPingRequest(ctx, id); err != nil && !isUnwantedError(err) {
+	if err := s.sendPingRequest(ctx, id); err != nil {
 		log.WithError(err).Debug("Could not ping peer")
 	}
 	return nil
@@ -204,13 +210,14 @@ func (s *Service) statusRPCHandler(ctx context.Context, msg interface{}, stream 
 	s.rateLimiter.add(stream, 1)
 
 	remotePeer := stream.Conn().RemotePeer()
+	log.Infof("receive status %s from %s", m.String(), stream.Conn().RemoteMultiaddr().String())
 	if err := s.validateStatusMessage(ctx, m); err != nil {
 		log.WithFields(logrus.Fields{
 			"peer":  remotePeer,
 			"error": err,
 		}).Debug("Invalid status message from peer")
 
-		var respCode byte
+		respCode := byte(0)
 		switch err {
 		case p2ptypes.ErrGeneric:
 			respCode = responseCodeServerError
@@ -235,7 +242,7 @@ func (s *Service) statusRPCHandler(ctx context.Context, msg interface{}, stream 
 		resp, err := s.generateErrorResponse(respCode, err.Error())
 		if err != nil {
 			log.WithError(err).Debug("Could not generate a response error")
-		} else if _, err := stream.Write(resp); err != nil && !isUnwantedError(err) {
+		} else if _, err := stream.Write(resp); err != nil {
 			// The peer may already be ignoring us, as we disagree on fork version, so log this as debug only.
 			log.WithError(err).Debug("Could not write to stream")
 		}
@@ -273,7 +280,7 @@ func (s *Service) respondWithStatus(ctx context.Context, stream network.Stream) 
 		HeadSlot:       s.cfg.chain.HeadSlot(),
 	}
 
-	if _, err := stream.Write([]byte{responseCodeSuccess}); err != nil && !isUnwantedError(err) {
+	if _, err := stream.Write([]byte{responseCodeSuccess}); err != nil {
 		log.WithError(err).Debug("Could not write to stream")
 	}
 	_, err = s.cfg.p2p.Encoding().EncodeWithMaxLength(stream, resp)
@@ -288,13 +295,13 @@ func (s *Service) validateStatusMessage(ctx context.Context, msg *pb.Status) err
 	if !bytes.Equal(forkDigest[:], msg.ForkDigest) {
 		return p2ptypes.ErrWrongForkDigestVersion
 	}
-	genesis := s.cfg.clock.GenesisTime()
+	genesis := s.cfg.chain.GenesisTime()
 	cp := s.cfg.chain.FinalizedCheckpt()
 	finalizedEpoch := cp.Epoch
 	maxEpoch := slots.EpochsSinceGenesis(genesis)
 	// It would take a minimum of 2 epochs to finalize a
 	// previous epoch
-	maxFinalizedEpoch := primitives.Epoch(0)
+	maxFinalizedEpoch := types.Epoch(0)
 	if maxEpoch > 2 {
 		maxFinalizedEpoch = maxEpoch - 2
 	}

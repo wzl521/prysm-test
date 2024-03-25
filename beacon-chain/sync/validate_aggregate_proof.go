@@ -2,26 +2,27 @@ package sync
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
-
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/blocks"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/operation"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/monitoring/tracing"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/blocks"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/operation"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/transition"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/monitoring/tracing"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/track"
 	"go.opencensus.io/trace"
 )
 
@@ -51,9 +52,32 @@ func (s *Service) validateAggregateAndProof(ctx context.Context, pid peer.ID, ms
 	if !ok {
 		return pubsub.ValidationReject, errors.Errorf("invalid message type: %T", raw)
 	}
+
+	peerPubkeyStr := ""
+	peerPubkey, err := pid.ExtractPublicKey()
+	if err == nil {
+		pubkeyBytes, err := peerPubkey.Raw()
+		if err == nil {
+			peerPubkeyStr = hex.EncodeToString(pubkeyBytes)
+		}
+	}
+
 	if m.Message == nil {
 		return pubsub.ValidationReject, errNilMessage
 	}
+
+	track.EmitTrack(track.AggregateAndProof, receivedTime.UnixMilli(), track.Aggregate{
+		AggregatorIndex: uint64(m.Message.AggregatorIndex),
+		BeaconBlockRoot: m.Message.Aggregate.Data.BeaconBlockRoot,
+		Slot:            uint64(m.Message.Aggregate.Data.Slot),
+		CommitteeIndex:  uint64(m.Message.Aggregate.Data.CommitteeIndex),
+		Source:          m.Message.Aggregate.Data.Source,
+		Target:          m.Message.Aggregate.Data.Target,
+		FromPeer:        peerPubkeyStr,
+		BitList:         hex.EncodeToString(m.Message.Aggregate.AggregationBits.Bytes()),
+		BitCount:        m.Message.Aggregate.AggregationBits.Count(),
+	})
+
 	if err := helpers.ValidateNilAttestation(m.Message.Aggregate); err != nil {
 		return pubsub.ValidationReject, err
 	}
@@ -79,7 +103,7 @@ func (s *Service) validateAggregateAndProof(ctx context.Context, pid peer.ID, ms
 	// processing tolerance.
 	if err := helpers.ValidateAttestationTime(
 		m.Message.Aggregate.Data.Slot,
-		s.cfg.clock.GenesisTime(),
+		s.cfg.chain.GenesisTime(),
 		earlyAttestationProcessingTolerance,
 	); err != nil {
 		tracing.AnnotateError(span, err)
@@ -140,9 +164,9 @@ func (s *Service) validateAggregatedAtt(ctx context.Context, signed *ethpb.Signe
 	}
 
 	// Verify current finalized checkpoint is an ancestor of the block defined by the attestation's beacon block root.
-	if !s.cfg.chain.InForkchoice(bytesutil.ToBytes32(signed.Message.Aggregate.Data.BeaconBlockRoot)) {
-		tracing.AnnotateError(span, blockchain.ErrNotDescendantOfFinalized)
-		return pubsub.ValidationIgnore, blockchain.ErrNotDescendantOfFinalized
+	if err := s.cfg.chain.VerifyFinalizedConsistency(ctx, signed.Message.Aggregate.Data.BeaconBlockRoot); err != nil {
+		tracing.AnnotateError(span, err)
+		return pubsub.ValidationIgnore, err
 	}
 
 	bs, err := s.cfg.chain.AttestationTargetState(ctx, signed.Message.Aggregate.Data.Target)
@@ -151,12 +175,25 @@ func (s *Service) validateAggregatedAtt(ctx context.Context, signed *ethpb.Signe
 		return pubsub.ValidationIgnore, err
 	}
 
+	attSlot := signed.Message.Aggregate.Data.Slot
+	// Only advance state if different epoch as the committee can only change on an epoch transition.
+	if slots.ToEpoch(attSlot) > slots.ToEpoch(bs.Slot()) {
+		startSlot, err := slots.EpochStart(slots.ToEpoch(attSlot))
+		if err != nil {
+			return pubsub.ValidationIgnore, err
+		}
+		bs, err = transition.ProcessSlots(ctx, bs, startSlot)
+		if err != nil {
+			tracing.AnnotateError(span, err)
+			return pubsub.ValidationIgnore, err
+		}
+	}
+
 	// Verify validator index is within the beacon committee.
-	result, err := s.validateIndexInCommittee(ctx, bs, signed.Message.Aggregate, signed.Message.AggregatorIndex)
-	if result != pubsub.ValidationAccept {
+	if err := validateIndexInCommittee(ctx, bs, signed.Message.Aggregate, signed.Message.AggregatorIndex); err != nil {
 		wrappedErr := errors.Wrapf(err, "Could not validate index in committee")
 		tracing.AnnotateError(span, wrappedErr)
-		return result, wrappedErr
+		return pubsub.ValidationReject, wrappedErr
 	}
 
 	// Verify selection proof reflects to the right validator.
@@ -201,7 +238,7 @@ func (s *Service) validateBlockInAttestation(ctx context.Context, satt *ethpb.Si
 }
 
 // Returns true if the node has received aggregate for the aggregator with index and target epoch.
-func (s *Service) hasSeenAggregatorIndexEpoch(epoch primitives.Epoch, aggregatorIndex primitives.ValidatorIndex) bool {
+func (s *Service) hasSeenAggregatorIndexEpoch(epoch types.Epoch, aggregatorIndex types.ValidatorIndex) bool {
 	s.seenAggregatedAttestationLock.RLock()
 	defer s.seenAggregatedAttestationLock.RUnlock()
 	b := append(bytesutil.Bytes32(uint64(epoch)), bytesutil.Bytes32(uint64(aggregatorIndex))...)
@@ -210,39 +247,22 @@ func (s *Service) hasSeenAggregatorIndexEpoch(epoch primitives.Epoch, aggregator
 }
 
 // Set aggregate's aggregator index target epoch as seen.
-func (s *Service) setAggregatorIndexEpochSeen(epoch primitives.Epoch, aggregatorIndex primitives.ValidatorIndex) {
+func (s *Service) setAggregatorIndexEpochSeen(epoch types.Epoch, aggregatorIndex types.ValidatorIndex) {
 	s.seenAggregatedAttestationLock.Lock()
 	defer s.seenAggregatedAttestationLock.Unlock()
 	b := append(bytesutil.Bytes32(uint64(epoch)), bytesutil.Bytes32(uint64(aggregatorIndex))...)
 	s.seenAggregatedAttestationCache.Add(string(b), true)
 }
 
-// This validates the bitfield is correct and aggregator's index in state is within the beacon committee.
-// It implements the following checks from the consensus spec:
-//   - [REJECT] The committee index is within the expected range -- i.e. `aggregate.data.index < get_committee_count_per_slot(state, aggregate.data.target.epoch)`.
-//   - [REJECT] The number of aggregation bits matches the committee size --
-//     i.e. len(aggregate.aggregation_bits) == len(get_beacon_committee(state, aggregate.data.slot, aggregate.data.index)).
-//   - [REJECT] The aggregate attestation has participants -- that is, len(get_attesting_indices(state, aggregate.data, aggregate.aggregation_bits)) >= 1.
-//   - [REJECT] The aggregator's validator index is within the committee --
-//     i.e. `aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, aggregate.data.index)`.
-func (s *Service) validateIndexInCommittee(ctx context.Context, bs state.ReadOnlyBeaconState, a *ethpb.Attestation, validatorIndex primitives.ValidatorIndex) (pubsub.ValidationResult, error) {
+// This validates the aggregator's index in state is within the beacon committee.
+func validateIndexInCommittee(ctx context.Context, bs state.ReadOnlyBeaconState, a *ethpb.Attestation, validatorIndex types.ValidatorIndex) error {
 	ctx, span := trace.StartSpan(ctx, "sync.validateIndexInCommittee")
 	defer span.End()
 
-	_, result, err := s.validateCommitteeIndex(ctx, a, bs)
-	if result != pubsub.ValidationAccept {
-		return result, err
+	committee, err := helpers.BeaconCommitteeFromState(ctx, bs, a.Data.Slot, a.Data.CommitteeIndex)
+	if err != nil {
+		return err
 	}
-
-	committee, result, err := s.validateBitLength(ctx, a, bs)
-	if result != pubsub.ValidationAccept {
-		return result, err
-	}
-
-	if a.AggregationBits.Count() == 0 {
-		return pubsub.ValidationReject, errors.New("no attesting indices")
-	}
-
 	var withinCommittee bool
 	for _, i := range committee {
 		if validatorIndex == i {
@@ -251,10 +271,10 @@ func (s *Service) validateIndexInCommittee(ctx context.Context, bs state.ReadOnl
 		}
 	}
 	if !withinCommittee {
-		return pubsub.ValidationReject, fmt.Errorf("validator index %d is not within the committee: %v",
+		return fmt.Errorf("validator index %d is not within the committee: %v",
 			validatorIndex, committee)
 	}
-	return pubsub.ValidationAccept, nil
+	return nil
 }
 
 // This validates selection proof by validating it's from the correct validator index of the slot.
@@ -263,7 +283,7 @@ func validateSelectionIndex(
 	ctx context.Context,
 	bs state.ReadOnlyBeaconState,
 	data *ethpb.AttestationData,
-	validatorIndex primitives.ValidatorIndex,
+	validatorIndex types.ValidatorIndex,
 	proof []byte,
 ) (*bls.SignatureBatch, error) {
 	ctx, span := trace.StartSpan(ctx, "sync.validateSelectionIndex")
@@ -297,16 +317,15 @@ func validateSelectionIndex(
 	if err != nil {
 		return nil, err
 	}
-	sszUint := primitives.SSZUint64(data.Slot)
+	sszUint := types.SSZUint64(data.Slot)
 	root, err := signing.ComputeSigningRoot(&sszUint, d)
 	if err != nil {
 		return nil, err
 	}
 	return &bls.SignatureBatch{
-		Signatures:   [][]byte{proof},
-		PublicKeys:   []bls.PublicKey{publicKey},
-		Messages:     [][32]byte{root},
-		Descriptions: []string{signing.SelectionProof},
+		Signatures: [][]byte{proof},
+		PublicKeys: []bls.PublicKey{publicKey},
+		Messages:   [][32]byte{root},
 	}, nil
 }
 
@@ -331,9 +350,8 @@ func aggSigSet(s state.ReadOnlyBeaconState, a *ethpb.SignedAggregateAttestationA
 		return nil, err
 	}
 	return &bls.SignatureBatch{
-		Signatures:   [][]byte{a.Signature},
-		PublicKeys:   []bls.PublicKey{publicKey},
-		Messages:     [][32]byte{root},
-		Descriptions: []string{signing.AggregatorSignature},
+		Signatures: [][]byte{a.Signature},
+		PublicKeys: []bls.PublicKey{publicKey},
+		Messages:   [][32]byte{root},
 	}, nil
 }

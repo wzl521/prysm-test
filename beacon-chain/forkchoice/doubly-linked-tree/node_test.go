@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/forkchoice"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	v1 "github.com/prysmaticlabs/prysm/v3/proto/eth/v1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func TestNode_ApplyWeightChanges_PositiveChange(t *testing.T) {
@@ -27,6 +27,8 @@ func TestNode_ApplyWeightChanges_PositiveChange(t *testing.T) {
 	// The updated balances of each node is 100
 	s := f.store
 
+	s.nodesLock.Lock()
+	defer s.nodesLock.Unlock()
 	s.nodeByRoot[indexToHash(1)].balance = 100
 	s.nodeByRoot[indexToHash(2)].balance = 100
 	s.nodeByRoot[indexToHash(3)].balance = 100
@@ -53,6 +55,8 @@ func TestNode_ApplyWeightChanges_NegativeChange(t *testing.T) {
 
 	// The updated balances of each node is 100
 	s := f.store
+	s.nodesLock.Lock()
+	defer s.nodesLock.Unlock()
 	s.nodeByRoot[indexToHash(1)].weight = 400
 	s.nodeByRoot[indexToHash(2)].weight = 400
 	s.nodeByRoot[indexToHash(3)].weight = 400
@@ -86,7 +90,7 @@ func TestNode_UpdateBestDescendant_NonViableChild(t *testing.T) {
 func TestNode_UpdateBestDescendant_ViableChild(t *testing.T) {
 	f := setup(1, 1)
 	ctx := context.Background()
-	// Input child is the best descendant
+	// Input child is best descendant
 	state, blkRoot, err := prepareForkchoiceState(ctx, 1, indexToHash(1), params.BeaconConfig().ZeroHash, params.BeaconConfig().ZeroHash, 1, 1)
 	require.NoError(t, err)
 	require.NoError(t, f.InsertNode(ctx, state, blkRoot))
@@ -99,7 +103,7 @@ func TestNode_UpdateBestDescendant_ViableChild(t *testing.T) {
 func TestNode_UpdateBestDescendant_HigherWeightChild(t *testing.T) {
 	f := setup(1, 1)
 	ctx := context.Background()
-	// Input child is the best descendant
+	// Input child is best descendant
 	state, blkRoot, err := prepareForkchoiceState(ctx, 1, indexToHash(1), params.BeaconConfig().ZeroHash, params.BeaconConfig().ZeroHash, 1, 1)
 	require.NoError(t, err)
 	require.NoError(t, f.InsertNode(ctx, state, blkRoot))
@@ -119,7 +123,7 @@ func TestNode_UpdateBestDescendant_HigherWeightChild(t *testing.T) {
 func TestNode_UpdateBestDescendant_LowerWeightChild(t *testing.T) {
 	f := setup(1, 1)
 	ctx := context.Background()
-	// Input child is the best descendant
+	// Input child is best descendant
 	state, blkRoot, err := prepareForkchoiceState(ctx, 1, indexToHash(1), params.BeaconConfig().ZeroHash, params.BeaconConfig().ZeroHash, 1, 1)
 	require.NoError(t, err)
 	require.NoError(t, f.InsertNode(ctx, state, blkRoot))
@@ -139,19 +143,19 @@ func TestNode_UpdateBestDescendant_LowerWeightChild(t *testing.T) {
 func TestNode_ViableForHead(t *testing.T) {
 	tests := []struct {
 		n              *Node
-		justifiedEpoch primitives.Epoch
+		justifiedEpoch types.Epoch
+		finalizedEpoch types.Epoch
 		want           bool
 	}{
-		{&Node{}, 0, true},
-		{&Node{}, 1, false},
-		{&Node{finalizedEpoch: 1, justifiedEpoch: 1}, 1, true},
-		{&Node{finalizedEpoch: 1, justifiedEpoch: 1}, 2, false},
-		{&Node{finalizedEpoch: 1, justifiedEpoch: 2}, 3, false},
-		{&Node{finalizedEpoch: 1, justifiedEpoch: 2}, 4, false},
-		{&Node{finalizedEpoch: 1, justifiedEpoch: 3}, 4, true},
+		{&Node{}, 0, 0, true},
+		{&Node{}, 1, 0, false},
+		{&Node{}, 0, 1, false},
+		{&Node{finalizedEpoch: 1, justifiedEpoch: 1}, 1, 1, true},
+		{&Node{finalizedEpoch: 1, justifiedEpoch: 1}, 2, 2, false},
+		{&Node{finalizedEpoch: 3, justifiedEpoch: 4}, 4, 3, true},
 	}
 	for _, tc := range tests {
-		got := tc.n.viableForHead(tc.justifiedEpoch, 5)
+		got := tc.n.viableForHead(tc.justifiedEpoch, tc.finalizedEpoch, 5)
 		assert.Equal(t, tc.want, got)
 	}
 }
@@ -175,10 +179,10 @@ func TestNode_LeadsToViableHead(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.InsertNode(ctx, state, blkRoot))
 
-	require.Equal(t, true, f.store.treeRootNode.leadsToViableHead(4, 5))
-	require.Equal(t, true, f.store.nodeByRoot[indexToHash(5)].leadsToViableHead(4, 5))
-	require.Equal(t, false, f.store.nodeByRoot[indexToHash(2)].leadsToViableHead(4, 5))
-	require.Equal(t, false, f.store.nodeByRoot[indexToHash(4)].leadsToViableHead(4, 5))
+	require.Equal(t, true, f.store.treeRootNode.leadsToViableHead(4, 3, 5))
+	require.Equal(t, true, f.store.nodeByRoot[indexToHash(5)].leadsToViableHead(4, 3, 5))
+	require.Equal(t, false, f.store.nodeByRoot[indexToHash(2)].leadsToViableHead(4, 3, 5))
+	require.Equal(t, false, f.store.nodeByRoot[indexToHash(4)].leadsToViableHead(4, 3, 5))
 }
 
 func TestNode_SetFullyValidated(t *testing.T) {
@@ -239,14 +243,14 @@ func TestNode_SetFullyValidated(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, false, opt)
 
-	respNodes := make([]*forkchoice.Node, 0)
+	respNodes := make([]*v1.ForkChoiceNode, 0)
 	respNodes, err = f.store.treeRootNode.nodeTreeDump(ctx, respNodes)
 	require.NoError(t, err)
 	require.Equal(t, len(respNodes), f.NodeCount())
 
 	for i, respNode := range respNodes {
 		require.Equal(t, storeNodes[i].slot, respNode.Slot)
-		require.DeepEqual(t, storeNodes[i].root[:], respNode.BlockRoot)
+		require.DeepEqual(t, storeNodes[i].root[:], respNode.Root)
 		require.Equal(t, storeNodes[i].balance, respNode.Balance)
 		require.Equal(t, storeNodes[i].weight, respNode.Weight)
 		require.Equal(t, storeNodes[i].optimistic, respNode.ExecutionOptimistic)
@@ -256,74 +260,4 @@ func TestNode_SetFullyValidated(t *testing.T) {
 		require.Equal(t, storeNodes[i].unrealizedFinalizedEpoch, respNode.UnrealizedFinalizedEpoch)
 		require.Equal(t, storeNodes[i].timestamp, respNode.Timestamp)
 	}
-}
-
-func TestNode_TimeStampsChecks(t *testing.T) {
-	f := setup(0, 0)
-	ctx := context.Background()
-
-	// early block
-	driftGenesisTime(f, 1, 1)
-	root := [32]byte{'a'}
-	f.justifiedBalances = []uint64{10}
-	state, blkRoot, err := prepareForkchoiceState(ctx, 1, root, params.BeaconConfig().ZeroHash, [32]byte{'A'}, 0, 0)
-	require.NoError(t, err)
-	require.NoError(t, f.InsertNode(ctx, state, blkRoot))
-	headRoot, err := f.Head(ctx)
-	require.NoError(t, err)
-	require.Equal(t, root, headRoot)
-	early, err := f.store.headNode.arrivedEarly(f.store.genesisTime)
-	require.NoError(t, err)
-	require.Equal(t, true, early)
-	late, err := f.store.headNode.arrivedAfterOrphanCheck(f.store.genesisTime)
-	require.NoError(t, err)
-	require.Equal(t, false, late)
-
-	orphanLateBlockFirstThreshold := params.BeaconConfig().SecondsPerSlot / params.BeaconConfig().IntervalsPerSlot
-	// late block
-	driftGenesisTime(f, 2, orphanLateBlockFirstThreshold+1)
-	root = [32]byte{'b'}
-	state, blkRoot, err = prepareForkchoiceState(ctx, 2, root, [32]byte{'a'}, [32]byte{'B'}, 0, 0)
-	require.NoError(t, err)
-	require.NoError(t, f.InsertNode(ctx, state, blkRoot))
-	headRoot, err = f.Head(ctx)
-	require.NoError(t, err)
-	require.Equal(t, root, headRoot)
-	early, err = f.store.headNode.arrivedEarly(f.store.genesisTime)
-	require.NoError(t, err)
-	require.Equal(t, false, early)
-	late, err = f.store.headNode.arrivedAfterOrphanCheck(f.store.genesisTime)
-	require.NoError(t, err)
-	require.Equal(t, false, late)
-
-	// very late block
-	driftGenesisTime(f, 3, ProcessAttestationsThreshold+1)
-	root = [32]byte{'c'}
-	state, blkRoot, err = prepareForkchoiceState(ctx, 3, root, [32]byte{'b'}, [32]byte{'C'}, 0, 0)
-	require.NoError(t, err)
-	require.NoError(t, f.InsertNode(ctx, state, blkRoot))
-	headRoot, err = f.Head(ctx)
-	require.NoError(t, err)
-	require.Equal(t, root, headRoot)
-	early, err = f.store.headNode.arrivedEarly(f.store.genesisTime)
-	require.NoError(t, err)
-	require.Equal(t, false, early)
-	late, err = f.store.headNode.arrivedAfterOrphanCheck(f.store.genesisTime)
-	require.NoError(t, err)
-	require.Equal(t, true, late)
-
-	// block from the future
-	root = [32]byte{'d'}
-	state, blkRoot, err = prepareForkchoiceState(ctx, 5, root, [32]byte{'c'}, [32]byte{'D'}, 1, 1)
-	require.NoError(t, err)
-	require.NoError(t, f.InsertNode(ctx, state, blkRoot))
-	headRoot, err = f.Head(ctx)
-	require.NoError(t, err)
-	require.Equal(t, root, headRoot)
-	early, err = f.store.headNode.arrivedEarly(f.store.genesisTime)
-	require.ErrorContains(t, "invalid timestamp", err)
-	require.Equal(t, true, early)
-	late, err = f.store.headNode.arrivedAfterOrphanCheck(f.store.genesisTime)
-	require.ErrorContains(t, "invalid timestamp", err)
-	require.Equal(t, false, late)
 }

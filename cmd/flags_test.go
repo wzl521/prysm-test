@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 	"github.com/urfave/cli/v2"
 )
 
@@ -17,27 +17,26 @@ func TestLoadFlagsFromConfig(t *testing.T) {
 	require.NoError(t, os.WriteFile("flags_test.yaml", []byte("testflag: 100"), 0666))
 
 	require.NoError(t, set.Parse([]string{"test-command", "--" + ConfigFileFlag.Name, "flags_test.yaml"}))
-	comFlags := WrapFlags([]cli.Flag{
-		&cli.StringFlag{
-			Name: ConfigFileFlag.Name,
-		},
-		&cli.IntFlag{
-			Name:  "testflag",
-			Value: 0,
-		},
-	})
 	command := &cli.Command{
-		Name:  "test-command",
-		Flags: comFlags,
+		Name: "test-command",
+		Flags: WrapFlags([]cli.Flag{
+			&cli.StringFlag{
+				Name: ConfigFileFlag.Name,
+			},
+			&cli.IntFlag{
+				Name:  "testflag",
+				Value: 0,
+			},
+		}),
 		Before: func(cliCtx *cli.Context) error {
-			return LoadFlagsFromConfig(cliCtx, comFlags)
+			return LoadFlagsFromConfig(cliCtx, cliCtx.Command.Flags)
 		},
 		Action: func(cliCtx *cli.Context) error {
 			require.Equal(t, 100, cliCtx.Int("testflag"))
 			return nil
 		},
 	}
-	require.NoError(t, command.Run(context, context.Args().Slice()...))
+	require.NoError(t, command.Run(context))
 	require.NoError(t, os.Remove("flags_test.yaml"))
 }
 

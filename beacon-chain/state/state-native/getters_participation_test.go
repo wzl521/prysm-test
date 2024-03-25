@@ -3,9 +3,10 @@ package state_native
 import (
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func TestState_UnrealizedCheckpointBalances(t *testing.T) {
@@ -19,7 +20,7 @@ func TestState_UnrealizedCheckpointBalances(t *testing.T) {
 		balances[i] = params.BeaconConfig().MaxEffectiveBalance
 	}
 	base := &ethpb.BeaconStateAltair{
-		Slot:        66,
+		Slot:        2,
 		RandaoMixes: make([][]byte, params.BeaconConfig().EpochsPerHistoricalVector),
 
 		Validators:                 validators,
@@ -27,6 +28,7 @@ func TestState_UnrealizedCheckpointBalances(t *testing.T) {
 		PreviousEpochParticipation: make([]byte, params.BeaconConfig().MinGenesisActiveValidatorCount),
 		Balances:                   balances,
 	}
+	features.Init(&features.Flags{EnableNativeState: true})
 	state, err := InitializeFromProtoAltair(base)
 	require.NoError(t, err)
 
@@ -35,8 +37,8 @@ func TestState_UnrealizedCheckpointBalances(t *testing.T) {
 	active, previous, current, err := state.UnrealizedCheckpointBalances()
 	require.NoError(t, err)
 	require.Equal(t, allActive, active)
-	require.Equal(t, params.BeaconConfig().EffectiveBalanceIncrement, current)
-	require.Equal(t, params.BeaconConfig().EffectiveBalanceIncrement, previous)
+	require.Equal(t, uint64(0), current)
+	require.Equal(t, uint64(0), previous)
 
 	// Add some votes in the last two epochs:
 	base.CurrentEpochParticipation[0] = 0xFF
@@ -57,8 +59,8 @@ func TestState_UnrealizedCheckpointBalances(t *testing.T) {
 	require.NoError(t, err)
 	active, previous, current, err = state.UnrealizedCheckpointBalances()
 	require.NoError(t, err)
-	require.Equal(t, allActive, active)
-	require.Equal(t, params.BeaconConfig().EffectiveBalanceIncrement, current)
+	require.Equal(t, allActive-params.BeaconConfig().MaxEffectiveBalance, active)
+	require.Equal(t, uint64(0), current)
 	require.Equal(t, params.BeaconConfig().MaxEffectiveBalance, previous)
 
 }

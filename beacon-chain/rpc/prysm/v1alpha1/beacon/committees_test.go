@@ -7,23 +7,22 @@ import (
 	"testing"
 	"time"
 
-	mock "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	dbTest "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/testing"
-	doublylinkedtree "github.com/prysmaticlabs/prysm/v5/beacon-chain/forkchoice/doubly-linked-tree"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stategen"
-	mockstategen "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stategen/mock"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	blocktest "github.com/prysmaticlabs/prysm/v5/consensus-types/blocks/testing"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	dbTest "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stategen"
+	mockstategen "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stategen/mock"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	blocktest "github.com/prysmaticlabs/prysm/v3/consensus-types/blocks/testing"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/d4l3k/messagediff.v1"
 )
@@ -43,7 +42,7 @@ func TestServer_ListBeaconCommittees_CurrentEpoch(t *testing.T) {
 	bs := &Server{
 		HeadFetcher:        m,
 		GenesisTimeFetcher: m,
-		StateGen:           stategen.New(db, doublylinkedtree.New()),
+		StateGen:           stategen.New(db),
 	}
 	b := util.NewBeaconBlock()
 	util.SaveBlock(t, ctx, db, b)
@@ -52,7 +51,7 @@ func TestServer_ListBeaconCommittees_CurrentEpoch(t *testing.T) {
 	require.NoError(t, db.SaveGenesisBlockRoot(ctx, gRoot))
 	require.NoError(t, db.SaveState(ctx, headState, gRoot))
 
-	bs.ReplayerBuilder = mockstategen.NewReplayerBuilder(mockstategen.WithMockState(headState))
+	bs.ReplayerBuilder = mockstategen.NewMockReplayerBuilder(mockstategen.WithMockState(headState))
 
 	activeIndices, err := helpers.ActiveValidatorIndices(ctx, headState, 0)
 	require.NoError(t, err)
@@ -76,14 +75,14 @@ func TestServer_ListBeaconCommittees_CurrentEpoch(t *testing.T) {
 }
 
 func addDefaultReplayerBuilder(s *Server, h stategen.HistoryAccessor) {
-	cc := &mockstategen.CanonicalChecker{Is: true, Err: nil}
-	cs := &mockstategen.CurrentSlotter{Slot: math.MaxUint64 - 1}
+	cc := &mockstategen.MockCanonicalChecker{Is: true, Err: nil}
+	cs := &mockstategen.MockCurrentSlotter{Slot: math.MaxUint64 - 1}
 	s.ReplayerBuilder = stategen.NewCanonicalHistory(h, cc, cs)
 }
 
 func TestServer_ListBeaconCommittees_PreviousEpoch(t *testing.T) {
 	params.SetupTestConfigCleanup(t)
-	params.OverrideBeaconConfig(params.BeaconConfig())
+	params.OverrideBeaconConfig(params.MainnetConfig())
 	ctx := context.Background()
 
 	db := dbTest.SetupDB(t)
@@ -116,7 +115,7 @@ func TestServer_ListBeaconCommittees_PreviousEpoch(t *testing.T) {
 	bs := &Server{
 		HeadFetcher:        m,
 		GenesisTimeFetcher: m,
-		StateGen:           stategen.New(db, doublylinkedtree.New()),
+		StateGen:           stategen.New(db),
 	}
 	addDefaultReplayerBuilder(bs, db)
 
@@ -171,7 +170,7 @@ func TestRetrieveCommitteesForRoot(t *testing.T) {
 	bs := &Server{
 		HeadFetcher:        m,
 		GenesisTimeFetcher: m,
-		StateGen:           stategen.New(db, doublylinkedtree.New()),
+		StateGen:           stategen.New(db),
 	}
 	b := util.NewBeaconBlock()
 	util.SaveBlock(t, ctx, db, b)

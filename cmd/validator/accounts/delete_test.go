@@ -13,16 +13,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/prysmaticlabs/prysm/v5/cmd/validator/flags"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
-	"github.com/prysmaticlabs/prysm/v5/validator/accounts"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager/local"
+	"github.com/prysmaticlabs/prysm/v3/cmd/validator/flags"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
+	"github.com/prysmaticlabs/prysm/v3/validator/accounts"
+	"github.com/prysmaticlabs/prysm/v3/validator/accounts/wallet"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager/local"
 	"github.com/urfave/cli/v2"
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
 )
@@ -52,11 +53,11 @@ func createKeystore(t *testing.T, path string) (*keymanager.Keystore, string) {
 	id, err := uuid.NewRandom()
 	require.NoError(t, err)
 	keystoreFile := &keymanager.Keystore{
-		Crypto:      cryptoFields,
-		ID:          id.String(),
-		Pubkey:      fmt.Sprintf("%x", validatingKey.PublicKey().Marshal()),
-		Version:     encryptor.Version(),
-		Description: encryptor.Name(),
+		Crypto:  cryptoFields,
+		ID:      id.String(),
+		Pubkey:  fmt.Sprintf("%x", validatingKey.PublicKey().Marshal()),
+		Version: encryptor.Version(),
+		Name:    encryptor.Name(),
 	}
 	encoded, err := json.MarshalIndent(keystoreFile, "", "\t")
 	require.NoError(t, err)
@@ -159,14 +160,13 @@ func TestDeleteAccounts_Noninteractive(t *testing.T) {
 		// Flags required for DeleteAccounts to work.
 		deletePublicKeys: deletePublicKeys,
 	})
-	opts := []accounts.Option{
-		accounts.WithWalletDir(walletDir),
-		accounts.WithKeymanagerType(keymanager.Local),
-		accounts.WithWalletPassword(password),
-	}
-	acc, err := accounts.NewCLIManager(opts...)
-	require.NoError(t, err)
-	w, err := acc.WalletCreate(cliCtx.Context)
+	w, err := accounts.CreateWalletWithKeymanager(cliCtx.Context, &accounts.CreateWalletConfig{
+		WalletCfg: &wallet.Config{
+			WalletDir:      walletDir,
+			KeymanagerKind: keymanager.Local,
+			WalletPassword: password,
+		},
+	})
 	require.NoError(t, err)
 
 	// We attempt to import accounts.

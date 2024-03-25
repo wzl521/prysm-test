@@ -6,14 +6,13 @@ import (
 	"math"
 
 	"github.com/pkg/errors"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/validator/accounts/wallet"
-	"github.com/prysmaticlabs/prysm/v5/validator/client/iface"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/validator/accounts/wallet"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager"
 )
 
 // List pretty-prints accounts in the wallet.
-func (acm *CLIManager) List(ctx context.Context) error {
+func (acm *AccountsCLIManager) List(ctx context.Context) error {
 	if acm.listValidatorIndices {
 		client, _, err := acm.prepareBeaconClients(ctx)
 		if err != nil {
@@ -23,13 +22,14 @@ func (acm *CLIManager) List(ctx context.Context) error {
 	}
 	return acm.keymanager.ListKeymanagerAccounts(ctx,
 		keymanager.ListKeymanagerAccountConfig{
+			ShowDepositData:          acm.showDepositData,
 			ShowPrivateKeys:          acm.showPrivateKeys,
 			WalletAccountsDir:        acm.wallet.AccountsDir(),
 			KeymanagerConfigFileName: wallet.KeymanagerConfigFileName,
 		})
 }
 
-func listValidatorIndices(ctx context.Context, km keymanager.IKeymanager, client iface.ValidatorClient) error {
+func listValidatorIndices(ctx context.Context, km keymanager.IKeymanager, client ethpb.BeaconNodeValidatorClient) error {
 	pubKeys, err := km.FetchValidatingPublicKeys(ctx)
 	if err != nil {
 		return errors.Wrap(err, "could not get validating public keys")

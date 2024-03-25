@@ -10,25 +10,44 @@ import (
 	"testing"
 
 	"github.com/gorilla/mux"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/flags"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/api/gateway/apimiddleware"
+	"github.com/prysmaticlabs/prysm/v3/cmd/beacon-chain/flags"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 	logTest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/urfave/cli/v2"
 )
+
+type mockEndpointFactory struct {
+}
+
+func (*mockEndpointFactory) Paths() []string {
+	return []string{}
+}
+
+func (*mockEndpointFactory) Create(_ string) (*apimiddleware.Endpoint, error) {
+	return nil, nil
+}
+
+func (*mockEndpointFactory) IsNil() bool {
+	return false
+}
 
 func TestGateway_Customized(t *testing.T) {
 	r := mux.NewRouter()
 	cert := "cert"
 	origins := []string{"origin"}
 	size := uint64(100)
+	endpointFactory := &mockEndpointFactory{}
 
 	opts := []Option{
 		WithRouter(r),
 		WithRemoteCert(cert),
 		WithAllowedOrigins(origins),
 		WithMaxCallRecvMsgSize(size),
+		WithApiMiddleware(endpointFactory),
 		WithMuxHandler(func(
+			_ *apimiddleware.ApiProxyMiddleware,
 			_ http.HandlerFunc,
 			_ http.ResponseWriter,
 			_ *http.Request,
@@ -44,6 +63,7 @@ func TestGateway_Customized(t *testing.T) {
 	require.Equal(t, 1, len(g.cfg.allowedOrigins))
 	assert.Equal(t, origins[0], g.cfg.allowedOrigins[0])
 	assert.Equal(t, size, g.cfg.maxCallRecvMsgSize)
+	assert.Equal(t, endpointFactory, g.cfg.apiMiddlewareEndpointFactory)
 }
 
 func TestGateway_StartStop(t *testing.T) {
@@ -63,6 +83,7 @@ func TestGateway_StartStop(t *testing.T) {
 		WithGatewayAddr(gatewayAddress),
 		WithRemoteAddr(selfAddress),
 		WithMuxHandler(func(
+			_ *apimiddleware.ApiProxyMiddleware,
 			_ http.HandlerFunc,
 			_ http.ResponseWriter,
 			_ *http.Request,

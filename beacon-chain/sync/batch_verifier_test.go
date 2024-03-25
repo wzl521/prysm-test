@@ -5,10 +5,9 @@ import (
 	"testing"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
 func TestValidateWithBatchVerifier(t *testing.T) {
@@ -17,16 +16,14 @@ func TestValidateWithBatchVerifier(t *testing.T) {
 	sig := keys[0].Sign(make([]byte, 32))
 	badSig := keys[1].Sign(make([]byte, 32))
 	validSet := &bls.SignatureBatch{
-		Messages:     [][32]byte{{}},
-		PublicKeys:   []bls.PublicKey{keys[0].PublicKey()},
-		Signatures:   [][]byte{sig.Marshal()},
-		Descriptions: []string{signing.UnknownSignature},
+		Messages:   [][32]byte{{}},
+		PublicKeys: []bls.PublicKey{keys[0].PublicKey()},
+		Signatures: [][]byte{sig.Marshal()},
 	}
 	invalidSet := &bls.SignatureBatch{
-		Messages:     [][32]byte{{}},
-		PublicKeys:   []bls.PublicKey{keys[0].PublicKey()},
-		Signatures:   [][]byte{badSig.Marshal()},
-		Descriptions: []string{signing.UnknownSignature},
+		Messages:   [][32]byte{{}},
+		PublicKeys: []bls.PublicKey{keys[0].PublicKey()},
+		Signatures: [][]byte{badSig.Marshal()},
 	}
 	tests := []struct {
 		name          string

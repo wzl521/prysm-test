@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/pkg/errors"
-	prefixed "github.com/prysmaticlabs/prysm/v5/runtime/logging/logrus-prefixed-formatter"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	. "github.com/prysmaticlabs/prysm/v3/runtime/logging/logrus-prefixed-formatter"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -15,13 +15,13 @@ import (
 )
 
 var _ = Describe("Formatter", func() {
-	var formatter *prefixed.TextFormatter
+	var formatter *TextFormatter
 	var log *logrus.Logger
 	var output *LogOutput
 
 	BeforeEach(func() {
 		output = new(LogOutput)
-		formatter = new(prefixed.TextFormatter)
+		formatter = new(TextFormatter)
 		log = logrus.New()
 		log.Out = output
 		log.Formatter = formatter
@@ -57,7 +57,7 @@ var _ = Describe("Formatter", func() {
 })
 
 func TestFormatter_SuppressErrorStackTraces(t *testing.T) {
-	formatter := new(prefixed.TextFormatter)
+	formatter := new(TextFormatter)
 	formatter.ForceFormatting = true
 	log := logrus.New()
 	log.Formatter = formatter
@@ -73,7 +73,7 @@ func TestFormatter_SuppressErrorStackTraces(t *testing.T) {
 }
 
 func TestFormatter_EscapesControlCharacters(t *testing.T) {
-	formatter := new(prefixed.TextFormatter)
+	formatter := new(TextFormatter)
 	formatter.ForceFormatting = true
 	log := logrus.New()
 	log.Formatter = formatter

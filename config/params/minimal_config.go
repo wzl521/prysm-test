@@ -3,7 +3,7 @@ package params
 import (
 	"math"
 
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
 )
 
 // MinimalSpecConfig retrieves the minimal config used in spec tests.
@@ -13,8 +13,7 @@ func MinimalSpecConfig() *BeaconChainConfig {
 	minimalConfig.MaxCommitteesPerSlot = 4
 	minimalConfig.TargetCommitteeSize = 4
 	minimalConfig.MaxValidatorsPerCommittee = 2048
-	minimalConfig.MinPerEpochChurnLimit = 2           // Changed in EIP7514
-	minimalConfig.MaxPerEpochActivationChurnLimit = 4 // New in EIP7514
+	minimalConfig.MinPerEpochChurnLimit = 4
 	minimalConfig.ChurnLimitQuotient = 32
 	minimalConfig.ShuffleRoundCount = 10
 	minimalConfig.MinGenesisActiveValidatorCount = 64
@@ -45,6 +44,7 @@ func MinimalSpecConfig() *BeaconChainConfig {
 	minimalConfig.ShardCommitteePeriod = 64
 	minimalConfig.MinEpochsToInactivityPenalty = 4
 	minimalConfig.Eth1FollowDistance = 16
+	minimalConfig.SafeSlotsToUpdateJustified = 2
 	minimalConfig.SecondsPerETH1Block = 14
 
 	// State vector lengths
@@ -67,8 +67,6 @@ func MinimalSpecConfig() *BeaconChainConfig {
 	minimalConfig.MaxAttestations = 128
 	minimalConfig.MaxDeposits = 16
 	minimalConfig.MaxVoluntaryExits = 16
-	minimalConfig.MaxWithdrawalsPerPayload = 4
-	minimalConfig.MaxValidatorsPerWithdrawalsSweep = 16
 
 	// Signature domains
 	minimalConfig.DomainBeaconProposer = bytesutil.ToBytes4(bytesutil.Bytes4(0))
@@ -89,13 +87,12 @@ func MinimalSpecConfig() *BeaconChainConfig {
 	minimalConfig.BellatrixForkEpoch = math.MaxUint64
 	minimalConfig.CapellaForkVersion = []byte{3, 0, 0, 1}
 	minimalConfig.CapellaForkEpoch = math.MaxUint64
-	minimalConfig.DenebForkVersion = []byte{4, 0, 0, 1}
-	minimalConfig.DenebForkEpoch = math.MaxUint64
+	minimalConfig.ShardingForkVersion = []byte{4, 0, 0, 1}
+	minimalConfig.ShardingForkEpoch = math.MaxUint64
 
 	minimalConfig.SyncCommitteeSize = 32
 	minimalConfig.InactivityScoreBias = 4
 	minimalConfig.EpochsPerSyncCommitteePeriod = 8
-	minimalConfig.MinEpochsForBlockRequests = 272
 
 	// Ethereum PoW parameters.
 	minimalConfig.DepositChainID = 5   // Chain ID of eth1 goerli.

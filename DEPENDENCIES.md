@@ -1,4 +1,4 @@
-# Dependency Management in Prysm
+# Dependency Managagement in Prysm
 
 Prysm is go project with many complicated dependencies, including some c++ based libraries. There
 are two parts to Prysm's dependency management. Go modules and bazel managed dependencies. Be sure 
@@ -28,7 +28,7 @@ including complicated c++ dependencies.
 One key advantage of Bazel over vanilla `go build` is that Bazel automatically (re)builds generated
 pb.go files at build time when file changes are present in any protobuf definition file or after
 any updates to the protobuf compiler or other relevant dependencies. Vanilla go users should run
-the following scripts often to ensure their generated files are up to date. Furthermore, Prysm
+the following scripts often to ensure their generated files are up to date. Further more, Prysm
 generates SSZ marshal related code based on defined data structures. These generated files must
 also be updated and checked in as frequently.
 
@@ -55,7 +55,7 @@ bazel build //beacon-chain --config=release
 ## Adding / updating dependencies
 
 1. Add your dependency as you would with go modules. I.e. `go get ...`
-1. Run `bazel run //:gazelle -- update-repos -from_file=go.mod` to update the bazel managed dependencies.
+1. Run `gazelle update-repos -from_file=go.mod` to update the bazel managed dependencies.
 
 Example:
 

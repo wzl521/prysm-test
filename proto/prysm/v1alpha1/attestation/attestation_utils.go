@@ -10,11 +10,11 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 	"go.opencensus.io/trace"
 )
 
@@ -25,19 +25,21 @@ import (
 // a state.
 //
 // Spec pseudocode definition:
+//   def get_indexed_attestation(state: BeaconState, attestation: Attestation) -> IndexedAttestation:
+//    """
+//    Return the indexed attestation corresponding to ``attestation``.
+//    """
+//    attesting_indices = get_attesting_indices(state, attestation.data, attestation.aggregation_bits)
 //
-//	def get_indexed_attestation(state: BeaconState, attestation: Attestation) -> IndexedAttestation:
-//	 """
-//	 Return the indexed attestation corresponding to ``attestation``.
-//	 """
-//	 attesting_indices = get_attesting_indices(state, attestation.data, attestation.aggregation_bits)
-//
-//	 return IndexedAttestation(
-//	     attesting_indices=sorted(attesting_indices),
-//	     data=attestation.data,
-//	     signature=attestation.signature,
-//	 )
-func ConvertToIndexed(ctx context.Context, attestation *ethpb.Attestation, committee []primitives.ValidatorIndex) (*ethpb.IndexedAttestation, error) {
+//    return IndexedAttestation(
+//        attesting_indices=sorted(attesting_indices),
+//        data=attestation.data,
+//        signature=attestation.signature,
+//    )
+func ConvertToIndexed(ctx context.Context, attestation *ethpb.Attestation, committee []types.ValidatorIndex) (*ethpb.IndexedAttestation, error) {
+	ctx, span := trace.StartSpan(ctx, "attestationutil.ConvertToIndexed")
+	defer span.End()
+
 	attIndices, err := AttestingIndices(attestation.AggregationBits, committee)
 	if err != nil {
 		return nil, err
@@ -59,22 +61,20 @@ func ConvertToIndexed(ctx context.Context, attestation *ethpb.Attestation, commi
 // Having the committee as an argument allows for re-use of beacon committees when possible.
 //
 // Spec pseudocode definition:
-//
-//	def get_attesting_indices(state: BeaconState,
-//	                       data: AttestationData,
-//	                       bits: Bitlist[MAX_VALIDATORS_PER_COMMITTEE]) -> Set[ValidatorIndex]:
-//	 """
-//	 Return the set of attesting indices corresponding to ``data`` and ``bits``.
-//	 """
-//	 committee = get_beacon_committee(state, data.slot, data.index)
-//	 return set(index for i, index in enumerate(committee) if bits[i])
-func AttestingIndices(bf bitfield.Bitfield, committee []primitives.ValidatorIndex) ([]uint64, error) {
+//   def get_attesting_indices(state: BeaconState,
+//                          data: AttestationData,
+//                          bits: Bitlist[MAX_VALIDATORS_PER_COMMITTEE]) -> Set[ValidatorIndex]:
+//    """
+//    Return the set of attesting indices corresponding to ``data`` and ``bits``.
+//    """
+//    committee = get_beacon_committee(state, data.slot, data.index)
+//    return set(index for i, index in enumerate(committee) if bits[i])
+func AttestingIndices(bf bitfield.Bitfield, committee []types.ValidatorIndex) ([]uint64, error) {
 	if bf.Len() != uint64(len(committee)) {
 		return nil, fmt.Errorf("bitfield length %d is not equal to committee length %d", bf.Len(), len(committee))
 	}
 	indices := make([]uint64, 0, bf.Count())
-	p := bf.BitIndices()
-	for _, idx := range p {
+	for _, idx := range bf.BitIndices() {
 		if idx < len(committee) {
 			indices = append(indices, uint64(committee[idx]))
 		}
@@ -87,25 +87,23 @@ func AttestingIndices(bf bitfield.Bitfield, committee []primitives.ValidatorInde
 // comment.
 //
 // Spec pseudocode definition:
-//
-//	def is_valid_indexed_attestation(state: BeaconState, indexed_attestation: IndexedAttestation) -> bool:
-//	 """
-//	 Check if ``indexed_attestation`` is not empty, has sorted and unique indices and has a valid aggregate signature.
-//	 """
-//	 # Verify indices are sorted and unique
-//	 indices = indexed_attestation.attesting_indices
-//	 if len(indices) == 0 or not indices == sorted(set(indices)):
-//	     return False
-//	 # Verify aggregate signature
-//	 pubkeys = [state.validators[i].pubkey for i in indices]
-//	 domain = get_domain(state, DOMAIN_BEACON_ATTESTER, indexed_attestation.data.target.epoch)
-//	 signing_root = compute_signing_root(indexed_attestation.data, domain)
-//	 return bls.FastAggregateVerify(pubkeys, signing_root, indexed_attestation.signature)
+//   def is_valid_indexed_attestation(state: BeaconState, indexed_attestation: IndexedAttestation) -> bool:
+//    """
+//    Check if ``indexed_attestation`` is not empty, has sorted and unique indices and has a valid aggregate signature.
+//    """
+//    # Verify indices are sorted and unique
+//    indices = indexed_attestation.attesting_indices
+//    if len(indices) == 0 or not indices == sorted(set(indices)):
+//        return False
+//    # Verify aggregate signature
+//    pubkeys = [state.validators[i].pubkey for i in indices]
+//    domain = get_domain(state, DOMAIN_BEACON_ATTESTER, indexed_attestation.data.target.epoch)
+//    signing_root = compute_signing_root(indexed_attestation.data, domain)
+//    return bls.FastAggregateVerify(pubkeys, signing_root, indexed_attestation.signature)
 func VerifyIndexedAttestationSig(ctx context.Context, indexedAtt *ethpb.IndexedAttestation, pubKeys []bls.PublicKey, domain []byte) error {
-	_, span := trace.StartSpan(ctx, "attestationutil.VerifyIndexedAttestationSig")
+	ctx, span := trace.StartSpan(ctx, "attestationutil.VerifyIndexedAttestationSig")
 	defer span.End()
 	indices := indexedAtt.AttestingIndices
-
 	messageHash, err := signing.ComputeSigningRoot(indexedAtt.Data, domain)
 	if err != nil {
 		return errors.Wrap(err, "could not get signing root of object")
@@ -124,26 +122,25 @@ func VerifyIndexedAttestationSig(ctx context.Context, indexedAtt *ethpb.IndexedA
 }
 
 // IsValidAttestationIndices this helper function performs the first part of the
-// spec indexed attestation validation starting at Check if “indexed_attestation“
+// spec indexed attestation validation starting at Check if ``indexed_attestation``
 // comment and ends at Verify aggregate signature comment.
 //
 // Spec pseudocode definition:
-//
-//	def is_valid_indexed_attestation(state: BeaconState, indexed_attestation: IndexedAttestation) -> bool:
-//	  """
-//	  Check if ``indexed_attestation`` is not empty, has sorted and unique indices and has a valid aggregate signature.
-//	  """
-//	  # Verify indices are sorted and unique
-//	  indices = indexed_attestation.attesting_indices
-//	  if len(indices) == 0 or not indices == sorted(set(indices)):
-//	      return False
-//	  # Verify aggregate signature
-//	  pubkeys = [state.validators[i].pubkey for i in indices]
-//	  domain = get_domain(state, DOMAIN_BEACON_ATTESTER, indexed_attestation.data.target.epoch)
-//	  signing_root = compute_signing_root(indexed_attestation.data, domain)
-//	  return bls.FastAggregateVerify(pubkeys, signing_root, indexed_attestation.signature)
+//  def is_valid_indexed_attestation(state: BeaconState, indexed_attestation: IndexedAttestation) -> bool:
+//    """
+//    Check if ``indexed_attestation`` is not empty, has sorted and unique indices and has a valid aggregate signature.
+//    """
+//    # Verify indices are sorted and unique
+//    indices = indexed_attestation.attesting_indices
+//    if len(indices) == 0 or not indices == sorted(set(indices)):
+//        return False
+//    # Verify aggregate signature
+//    pubkeys = [state.validators[i].pubkey for i in indices]
+//    domain = get_domain(state, DOMAIN_BEACON_ATTESTER, indexed_attestation.data.target.epoch)
+//    signing_root = compute_signing_root(indexed_attestation.data, domain)
+//    return bls.FastAggregateVerify(pubkeys, signing_root, indexed_attestation.signature)
 func IsValidAttestationIndices(ctx context.Context, indexedAttestation *ethpb.IndexedAttestation) error {
-	_, span := trace.StartSpan(ctx, "attestationutil.IsValidAttestationIndices")
+	ctx, span := trace.StartSpan(ctx, "attestationutil.IsValidAttestationIndices")
 	defer span.End()
 
 	if indexedAttestation == nil || indexedAttestation.Data == nil || indexedAttestation.Data.Target == nil || indexedAttestation.AttestingIndices == nil {

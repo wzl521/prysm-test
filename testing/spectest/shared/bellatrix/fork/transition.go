@@ -6,19 +6,20 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/transition"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/spectest/utils"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/transition"
+	v2 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v2"
+	v3 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v3"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/spectest/utils"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
-type Config struct {
+type ForkConfig struct {
 	PostFork    string `json:"post_fork"`
 	ForkEpoch   int    `json:"fork_epoch"`
 	ForkBlock   *int   `json:"fork_block"`
@@ -31,15 +32,12 @@ func RunForkTransitionTest(t *testing.T, config string) {
 	require.NoError(t, utils.SetConfig(t, config))
 
 	testFolders, testsFolderPath := utils.TestFolders(t, config, "bellatrix", "transition/core/pyspec_tests")
-	if len(testFolders) == 0 {
-		t.Fatalf("No test folders found for %s/%s/%s", config, "bellatrix", "transition/core/pyspec_tests")
-	}
 	for _, folder := range testFolders {
 		t.Run(folder.Name(), func(t *testing.T) {
 			helpers.ClearCache()
 			file, err := util.BazelFileBytes(testsFolderPath, folder.Name(), "meta.yaml")
 			require.NoError(t, err)
-			config := &Config{}
+			config := &ForkConfig{}
 			require.NoError(t, utils.UnmarshalYaml(file, config), "Failed to Unmarshal")
 
 			preforkBlocks := make([]*ethpb.SignedBeaconBlockAltair, 0)
@@ -86,11 +84,11 @@ func RunForkTransitionTest(t *testing.T, config string) {
 			require.NoError(t, err, "Failed to decompress")
 			beaconStateBase := &ethpb.BeaconStateAltair{}
 			require.NoError(t, beaconStateBase.UnmarshalSSZ(preBeaconStateSSZ), "Failed to unmarshal")
-			beaconState, err := state_native.InitializeFromProtoAltair(beaconStateBase)
+			beaconState, err := v2.InitializeFromProto(beaconStateBase)
 			require.NoError(t, err)
 
 			bc := params.BeaconConfig().Copy()
-			bc.BellatrixForkEpoch = primitives.Epoch(config.ForkEpoch)
+			bc.BellatrixForkEpoch = types.Epoch(config.ForkEpoch)
 			params.OverrideBeaconConfig(bc)
 
 			ctx := context.Background()
@@ -100,7 +98,7 @@ func RunForkTransitionTest(t *testing.T, config string) {
 				require.NoError(t, err)
 				st, err := transition.ExecuteStateTransition(ctx, beaconState, wsb)
 				require.NoError(t, err)
-				beaconState, ok = st.(*state_native.BeaconState)
+				beaconState, ok = st.(*v2.BeaconState)
 				require.Equal(t, true, ok)
 			}
 
@@ -109,7 +107,7 @@ func RunForkTransitionTest(t *testing.T, config string) {
 				require.NoError(t, err)
 				st, err := transition.ExecuteStateTransition(ctx, beaconState, wsb)
 				require.NoError(t, err)
-				beaconState, ok = st.(*state_native.BeaconState)
+				beaconState, ok = st.(*v3.BeaconState)
 				require.Equal(t, true, ok)
 			}
 
@@ -120,7 +118,7 @@ func RunForkTransitionTest(t *testing.T, config string) {
 			postBeaconState := &ethpb.BeaconStateBellatrix{}
 			require.NoError(t, postBeaconState.UnmarshalSSZ(postBeaconStateSSZ), "Failed to unmarshal")
 
-			pbState, err := state_native.ProtobufBeaconStateBellatrix(beaconState.ToProto())
+			pbState, err := v3.ProtobufBeaconState(beaconState.CloneInnerState())
 			require.NoError(t, err)
 			require.DeepSSZEqual(t, pbState, postBeaconState)
 		})

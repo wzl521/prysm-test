@@ -5,13 +5,12 @@ import (
 	"context"
 	"time"
 
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	validatorserviceconfig "github.com/prysmaticlabs/prysm/v5/config/validator/service"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
-	"github.com/prysmaticlabs/prysm/v5/validator/client/iface"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
+	"github.com/prysmaticlabs/prysm/v3/validator/client/iface"
+	"github.com/prysmaticlabs/prysm/v3/validator/keymanager"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -43,7 +42,7 @@ type FakeValidator struct {
 	AttestToBlockHeadArg1             uint64
 	RoleAtArg1                        uint64
 	UpdateDutiesArg1                  uint64
-	NextSlotRet                       <-chan primitives.Slot
+	NextSlotRet                       <-chan types.Slot
 	PublicKey                         string
 	UpdateDutiesRet                   error
 	ProposerSettingsErr               error
@@ -52,10 +51,13 @@ type FakeValidator struct {
 	IndexToPubkeyMap                  map[uint64][fieldparams.BLSPubkeyLength]byte
 	PubkeyToIndexMap                  map[[fieldparams.BLSPubkeyLength]byte]uint64
 	PubkeysToStatusesMap              map[[fieldparams.BLSPubkeyLength]byte]ethpb.ValidatorStatus
-	proposerSettings                  *validatorserviceconfig.ProposerSettings
-	ProposerSettingWait               time.Duration
 	Km                                keymanager.IKeymanager
 }
+
+type ctxKey string
+
+// AllValidatorsAreExitedCtxKey represents the metadata context key used for exits.
+var AllValidatorsAreExitedCtxKey = ctxKey("exited")
 
 // Done for mocking.
 func (fv *FakeValidator) Done() {
@@ -69,7 +71,7 @@ func (fv *FakeValidator) WaitForKeymanagerInitialization(_ context.Context) erro
 }
 
 // LogSyncCommitteeMessagesSubmitted --
-func (fv *FakeValidator) LogSubmittedSyncCommitteeMessages() {}
+func (fv *FakeValidator) LogSyncCommitteeMessagesSubmitted() {}
 
 // WaitForChainStart for mocking.
 func (fv *FakeValidator) WaitForChainStart(_ context.Context) error {
@@ -81,11 +83,8 @@ func (fv *FakeValidator) WaitForChainStart(_ context.Context) error {
 }
 
 // WaitForActivation for mocking.
-func (fv *FakeValidator) WaitForActivation(_ context.Context, accountChan chan [][fieldparams.BLSPubkeyLength]byte) error {
+func (fv *FakeValidator) WaitForActivation(_ context.Context, _ chan [][fieldparams.BLSPubkeyLength]byte) error {
 	fv.WaitForActivationCalled++
-	if accountChan == nil {
-		return nil
-	}
 	if fv.RetryTillSuccess >= fv.WaitForActivationCalled {
 		return iface.ErrConnectionIssue
 	}
@@ -108,7 +107,7 @@ func (fv *FakeValidator) SlasherReady(_ context.Context) error {
 }
 
 // CanonicalHeadSlot for mocking.
-func (fv *FakeValidator) CanonicalHeadSlot(_ context.Context) (primitives.Slot, error) {
+func (fv *FakeValidator) CanonicalHeadSlot(_ context.Context) (types.Slot, error) {
 	fv.CanonicalHeadSlotCalled++
 	if fv.RetryTillSuccess > fv.CanonicalHeadSlotCalled {
 		return 0, iface.ErrConnectionIssue
@@ -117,19 +116,19 @@ func (fv *FakeValidator) CanonicalHeadSlot(_ context.Context) (primitives.Slot, 
 }
 
 // SlotDeadline for mocking.
-func (fv *FakeValidator) SlotDeadline(_ primitives.Slot) time.Time {
+func (fv *FakeValidator) SlotDeadline(_ types.Slot) time.Time {
 	fv.SlotDeadlineCalled = true
 	return prysmTime.Now()
 }
 
 // NextSlot for mocking.
-func (fv *FakeValidator) NextSlot() <-chan primitives.Slot {
+func (fv *FakeValidator) NextSlot() <-chan types.Slot {
 	fv.NextSlotCalled = true
 	return fv.NextSlotRet
 }
 
 // UpdateDuties for mocking.
-func (fv *FakeValidator) UpdateDuties(_ context.Context, slot primitives.Slot) error {
+func (fv *FakeValidator) UpdateDuties(_ context.Context, slot types.Slot) error {
 	fv.UpdateDutiesCalled = true
 	fv.UpdateDutiesArg1 = uint64(slot)
 	return fv.UpdateDutiesRet
@@ -142,7 +141,7 @@ func (fv *FakeValidator) UpdateProtections(_ context.Context, _ uint64) error {
 }
 
 // LogValidatorGainsAndLosses for mocking.
-func (fv *FakeValidator) LogValidatorGainsAndLosses(_ context.Context, _ primitives.Slot) error {
+func (fv *FakeValidator) LogValidatorGainsAndLosses(_ context.Context, _ types.Slot) error {
 	fv.LogValidatorGainsAndLossesCalled = true
 	return nil
 }
@@ -153,7 +152,7 @@ func (fv *FakeValidator) ResetAttesterProtectionData() {
 }
 
 // RolesAt for mocking.
-func (fv *FakeValidator) RolesAt(_ context.Context, slot primitives.Slot) (map[[fieldparams.BLSPubkeyLength]byte][]iface.ValidatorRole, error) {
+func (fv *FakeValidator) RolesAt(_ context.Context, slot types.Slot) (map[[fieldparams.BLSPubkeyLength]byte][]iface.ValidatorRole, error) {
 	fv.RoleAtCalled = true
 	fv.RoleAtArg1 = uint64(slot)
 	vr := make(map[[fieldparams.BLSPubkeyLength]byte][]iface.ValidatorRole)
@@ -162,30 +161,30 @@ func (fv *FakeValidator) RolesAt(_ context.Context, slot primitives.Slot) (map[[
 }
 
 // SubmitAttestation for mocking.
-func (fv *FakeValidator) SubmitAttestation(_ context.Context, slot primitives.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
+func (fv *FakeValidator) SubmitAttestation(_ context.Context, slot types.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
 	fv.AttestToBlockHeadCalled = true
 	fv.AttestToBlockHeadArg1 = uint64(slot)
 }
 
 // ProposeBlock for mocking.
-func (fv *FakeValidator) ProposeBlock(_ context.Context, slot primitives.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
+func (fv *FakeValidator) ProposeBlock(_ context.Context, slot types.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
 	fv.ProposeBlockCalled = true
 	fv.ProposeBlockArg1 = uint64(slot)
 }
 
 // SubmitAggregateAndProof for mocking.
-func (*FakeValidator) SubmitAggregateAndProof(_ context.Context, _ primitives.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
+func (_ *FakeValidator) SubmitAggregateAndProof(_ context.Context, _ types.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
 }
 
 // SubmitSyncCommitteeMessage for mocking.
-func (*FakeValidator) SubmitSyncCommitteeMessage(_ context.Context, _ primitives.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
+func (_ *FakeValidator) SubmitSyncCommitteeMessage(_ context.Context, _ types.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
 }
 
-// LogSubmittedAtts for mocking.
-func (*FakeValidator) LogSubmittedAtts(_ primitives.Slot) {}
+// LogAttestationsSubmitted for mocking.
+func (_ *FakeValidator) LogAttestationsSubmitted() {}
 
 // UpdateDomainDataCaches for mocking.
-func (*FakeValidator) UpdateDomainDataCaches(context.Context, primitives.Slot) {}
+func (_ *FakeValidator) UpdateDomainDataCaches(context.Context, types.Slot) {}
 
 // BalancesByPubkeys for mocking.
 func (fv *FakeValidator) BalancesByPubkeys(_ context.Context) map[[fieldparams.BLSPubkeyLength]byte]uint64 {
@@ -207,18 +206,26 @@ func (fv *FakeValidator) PubkeysToStatuses(_ context.Context) map[[fieldparams.B
 	return fv.PubkeysToStatusesMap
 }
 
+// AllValidatorsAreExited for mocking
+func (_ *FakeValidator) AllValidatorsAreExited(ctx context.Context) (bool, error) {
+	if ctx.Value(AllValidatorsAreExitedCtxKey) == nil {
+		return false, nil
+	}
+	return ctx.Value(AllValidatorsAreExitedCtxKey).(bool), nil
+}
+
 // Keymanager for mocking
 func (fv *FakeValidator) Keymanager() (keymanager.IKeymanager, error) {
 	return fv.Km, nil
 }
 
 // CheckDoppelGanger for mocking
-func (*FakeValidator) CheckDoppelGanger(_ context.Context) error {
+func (_ *FakeValidator) CheckDoppelGanger(_ context.Context) error {
 	return nil
 }
 
-// ReceiveSlots for mocking
-func (fv *FakeValidator) ReceiveSlots(_ context.Context, connectionErrorChannel chan<- error) {
+// ReceiveBlocks for mocking
+func (fv *FakeValidator) ReceiveBlocks(_ context.Context, connectionErrorChannel chan<- error) {
 	fv.ReceiveBlocksCalled++
 	if fv.RetryTillSuccess > fv.ReceiveBlocksCalled {
 		connectionErrorChannel <- iface.ErrConnectionIssue
@@ -237,63 +244,24 @@ func (fv *FakeValidator) HandleKeyReload(_ context.Context, newKeys [][fieldpara
 }
 
 // SubmitSignedContributionAndProof for mocking
-func (*FakeValidator) SubmitSignedContributionAndProof(_ context.Context, _ primitives.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
-}
-
-// HasProposerSettings for mocking
-func (*FakeValidator) HasProposerSettings() bool {
-	return true
+func (_ *FakeValidator) SubmitSignedContributionAndProof(_ context.Context, _ types.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
 }
 
 // PushProposerSettings for mocking
-func (fv *FakeValidator) PushProposerSettings(ctx context.Context, km keymanager.IKeymanager, slot primitives.Slot, deadline time.Time) error {
-	nctx, cancel := context.WithDeadline(ctx, deadline)
-	ctx = nctx
-	defer cancel()
-	time.Sleep(fv.ProposerSettingWait)
-	if ctx.Err() == context.DeadlineExceeded {
-		log.Error("deadline exceeded")
-		// can't return error or it will trigger a log.fatal
-		return nil
-	}
-
+func (fv *FakeValidator) PushProposerSettings(_ context.Context, _ keymanager.IKeymanager) error {
 	if fv.ProposerSettingsErr != nil {
 		return fv.ProposerSettingsErr
 	}
-
 	log.Infoln("Mock updated proposer settings")
 	return nil
 }
 
 // SetPubKeyToValidatorIndexMap for mocking
-func (*FakeValidator) SetPubKeyToValidatorIndexMap(_ context.Context, _ keymanager.IKeymanager) error {
+func (_ *FakeValidator) SetPubKeyToValidatorIndexMap(_ context.Context, _ keymanager.IKeymanager) error {
 	return nil
 }
 
 // SignValidatorRegistrationRequest for mocking
-func (*FakeValidator) SignValidatorRegistrationRequest(_ context.Context, _ iface.SigningFunc, _ *ethpb.ValidatorRegistrationV1) (*ethpb.SignedValidatorRegistrationV1, error) {
+func (_ *FakeValidator) SignValidatorRegistrationRequest(_ context.Context, _ iface.SigningFunc, _ *ethpb.ValidatorRegistrationV1) (*ethpb.SignedValidatorRegistrationV1, error) {
 	return nil, nil
-}
-
-// ProposerSettings for mocking
-func (fv *FakeValidator) ProposerSettings() *validatorserviceconfig.ProposerSettings {
-	return fv.proposerSettings
-}
-
-// SetProposerSettings for mocking
-func (fv *FakeValidator) SetProposerSettings(_ context.Context, settings *validatorserviceconfig.ProposerSettings) error {
-	fv.proposerSettings = settings
-	return nil
-}
-
-func (fv *FakeValidator) StartEventStream(_ context.Context) error {
-	return nil
-}
-
-func (fv *FakeValidator) EventStreamIsRunning() bool {
-	return true
-}
-
-func (fv *FakeValidator) NodeIsHealthy(context.Context) bool {
-	return true
 }

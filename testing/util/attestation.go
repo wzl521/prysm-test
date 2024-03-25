@@ -7,20 +7,22 @@ import (
 	"math"
 
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/transition"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/crypto/rand"
-	attv1 "github.com/prysmaticlabs/prysm/v5/proto/eth/v1"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/transition"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
+	v2 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v2"
+	v3 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v3"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/crypto/rand"
+	attv1 "github.com/prysmaticlabs/prysm/v3/proto/eth/v1"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/runtime/version"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -49,7 +51,7 @@ func NewAttestation() *ethpb.Attestation {
 //
 // If you request 4 attestations, but there are 8 committees, you will get 4 fully aggregated attestations.
 func GenerateAttestations(
-	bState state.BeaconState, privs []bls.SecretKey, numToGen uint64, slot primitives.Slot, randomRoot bool,
+	bState state.BeaconState, privs []bls.SecretKey, numToGen uint64, slot types.Slot, randomRoot bool,
 ) ([]*ethpb.Attestation, error) {
 	var attestations []*ethpb.Attestation
 	generateHeadState := false
@@ -69,41 +71,31 @@ func GenerateAttestations(
 		var headState state.BeaconState
 		switch bState.Version() {
 		case version.Phase0:
-			pbState, err := state_native.ProtobufBeaconStatePhase0(bState.ToProto())
+			pbState, err := v1.ProtobufBeaconState(bState.CloneInnerState())
 			if err != nil {
 				return nil, err
 			}
-			genState, err := state_native.InitializeFromProtoUnsafePhase0(pbState)
+			genState, err := v1.InitializeFromProtoUnsafe(pbState)
 			if err != nil {
 				return nil, err
 			}
 			headState = genState
 		case version.Altair:
-			pbState, err := state_native.ProtobufBeaconStateAltair(bState.ToProto())
+			pbState, err := v2.ProtobufBeaconState(bState.CloneInnerState())
 			if err != nil {
 				return nil, err
 			}
-			genState, err := state_native.InitializeFromProtoUnsafeAltair(pbState)
+			genState, err := v2.InitializeFromProtoUnsafe(pbState)
 			if err != nil {
 				return nil, err
 			}
 			headState = genState
 		case version.Bellatrix:
-			pbState, err := state_native.ProtobufBeaconStateBellatrix(bState.ToProto())
+			pbState, err := v3.ProtobufBeaconState(bState.CloneInnerState())
 			if err != nil {
 				return nil, err
 			}
-			genState, err := state_native.InitializeFromProtoUnsafeBellatrix(pbState)
-			if err != nil {
-				return nil, err
-			}
-			headState = genState
-		case version.Capella:
-			pbState, err := state_native.ProtobufBeaconStateCapella(bState.ToProto())
-			if err != nil {
-				return nil, err
-			}
-			genState, err := state_native.InitializeFromProtoUnsafeCapella(pbState)
+			genState, err := v3.InitializeFromProtoUnsafe(pbState)
 			if err != nil {
 				return nil, err
 			}
@@ -174,7 +166,7 @@ func GenerateAttestations(
 	if err != nil {
 		return nil, err
 	}
-	for c := primitives.CommitteeIndex(0); uint64(c) < committeesPerSlot && uint64(c) < numToGen; c++ {
+	for c := types.CommitteeIndex(0); uint64(c) < committeesPerSlot && uint64(c) < numToGen; c++ {
 		committee, err := helpers.BeaconCommitteeFromState(context.Background(), bState, slot, c)
 		if err != nil {
 			return nil, err

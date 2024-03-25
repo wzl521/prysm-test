@@ -7,22 +7,22 @@ import (
 
 	fuzz "github.com/google/gofuzz"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/altair"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/time"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/math"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/attestation"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/altair"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/time"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	stateAltair "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v2"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/math"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/attestation"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
 func TestProcessAttestations_InclusionDelayFailure(t *testing.T) {
@@ -50,7 +50,7 @@ func TestProcessAttestations_InclusionDelayFailure(t *testing.T) {
 	)
 	wsb, err := blocks.NewSignedBeaconBlock(b)
 	require.NoError(t, err)
-	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb.Block())
+	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb)
 	require.ErrorContains(t, want, err)
 }
 
@@ -81,7 +81,7 @@ func TestProcessAttestations_NeitherCurrentNorPrevEpoch(t *testing.T) {
 	)
 	wsb, err := blocks.NewSignedBeaconBlock(b)
 	require.NoError(t, err)
-	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb.Block())
+	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb)
 	require.ErrorContains(t, want, err)
 }
 
@@ -110,13 +110,13 @@ func TestProcessAttestations_CurrentEpochFFGDataMismatches(t *testing.T) {
 	want := "source check point not equal to current justified checkpoint"
 	wsb, err := blocks.NewSignedBeaconBlock(b)
 	require.NoError(t, err)
-	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb.Block())
+	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb)
 	require.ErrorContains(t, want, err)
 	b.Block.Body.Attestations[0].Data.Source.Epoch = time.CurrentEpoch(beaconState)
 	b.Block.Body.Attestations[0].Data.Source.Root = []byte{}
 	wsb, err = blocks.NewSignedBeaconBlock(b)
 	require.NoError(t, err)
-	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb.Block())
+	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb)
 	require.ErrorContains(t, want, err)
 }
 
@@ -151,14 +151,14 @@ func TestProcessAttestations_PrevEpochFFGDataMismatches(t *testing.T) {
 	want := "source check point not equal to previous justified checkpoint"
 	wsb, err := blocks.NewSignedBeaconBlock(b)
 	require.NoError(t, err)
-	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb.Block())
+	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb)
 	require.ErrorContains(t, want, err)
 	b.Block.Body.Attestations[0].Data.Source.Epoch = time.PrevEpoch(beaconState)
 	b.Block.Body.Attestations[0].Data.Target.Epoch = time.PrevEpoch(beaconState)
 	b.Block.Body.Attestations[0].Data.Source.Root = []byte{}
 	wsb, err = blocks.NewSignedBeaconBlock(b)
 	require.NoError(t, err)
-	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb.Block())
+	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb)
 	require.ErrorContains(t, want, err)
 }
 
@@ -190,7 +190,7 @@ func TestProcessAttestations_InvalidAggregationBitsLength(t *testing.T) {
 	expected := "failed to verify aggregation bitfield: wanted participants bitfield length 3, got: 4"
 	wsb, err := blocks.NewSignedBeaconBlock(b)
 	require.NoError(t, err)
-	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb.Block())
+	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb)
 	require.ErrorContains(t, expected, err)
 }
 
@@ -234,7 +234,7 @@ func TestProcessAttestations_OK(t *testing.T) {
 	require.NoError(t, err)
 	wsb, err := blocks.NewSignedBeaconBlock(block)
 	require.NoError(t, err)
-	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb.Block())
+	_, err = altair.ProcessAttestationsNoVerifySignature(context.Background(), beaconState, wsb)
 	require.NoError(t, err)
 }
 
@@ -256,7 +256,7 @@ func TestProcessAttestationNoVerify_SourceTargetHead(t *testing.T) {
 		},
 		AggregationBits: aggBits,
 	}
-	var zeroSig [96]byte
+	zeroSig := [96]byte{}
 	att.Signature = zeroSig[:]
 
 	ckp := beaconState.CurrentJustifiedCheckpoint()
@@ -419,14 +419,14 @@ func TestFuzzProcessAttestationsNoVerify_10000(t *testing.T) {
 		if b.Block == nil {
 			b.Block = &ethpb.BeaconBlockAltair{}
 		}
-		s, err := state_native.InitializeFromProtoUnsafeAltair(st)
+		s, err := stateAltair.InitializeFromProtoUnsafe(st)
 		require.NoError(t, err)
 		if b.Block == nil || b.Block.Body == nil {
 			continue
 		}
 		wsb, err := blocks.NewSignedBeaconBlock(b)
 		require.NoError(t, err)
-		r, err := altair.ProcessAttestationsNoVerifySignature(context.Background(), s, wsb.Block())
+		r, err := altair.ProcessAttestationsNoVerifySignature(context.Background(), s, wsb)
 		if err != nil && r != nil {
 			t.Fatalf("return value should be nil on err. found: %v on error: %v for state: %v and block: %v", r, err, s, b)
 		}
@@ -443,7 +443,7 @@ func TestSetParticipationAndRewardProposer(t *testing.T) {
 		indices             []uint64
 		epochParticipation  []byte
 		participatedFlags   map[uint8]bool
-		epoch               primitives.Epoch
+		epoch               types.Epoch
 		wantedBalance       uint64
 		wantedParticipation []byte
 	}{
@@ -630,14 +630,11 @@ func TestAttestationParticipationFlagIndices(t *testing.T) {
 	targetFlagIndex := cfg.TimelyTargetFlagIndex
 	headFlagIndex := cfg.TimelyHeadFlagIndex
 
-	denebState, _ := util.DeterministicGenesisStateDeneb(t, params.BeaconConfig().MaxValidatorsPerCommittee)
-	require.NoError(t, denebState.SetSlot(1))
-
 	tests := []struct {
 		name                 string
 		inputState           state.BeaconState
 		inputData            *ethpb.AttestationData
-		inputDelay           primitives.Slot
+		inputDelay           types.Slot
 		participationIndices map[uint8]bool
 	}{
 		{
@@ -661,7 +658,7 @@ func TestAttestationParticipationFlagIndices(t *testing.T) {
 				Source: &ethpb.Checkpoint{Root: params.BeaconConfig().ZeroHash[:]},
 				Target: &ethpb.Checkpoint{},
 			},
-			inputDelay: primitives.Slot(math.IntegerSquareRoot(uint64(cfg.SlotsPerEpoch)) - 1),
+			inputDelay: types.Slot(math.IntegerSquareRoot(uint64(cfg.SlotsPerEpoch)) - 1),
 			participationIndices: map[uint8]bool{
 				sourceFlagIndex: true,
 			},
@@ -675,37 +672,9 @@ func TestAttestationParticipationFlagIndices(t *testing.T) {
 				Source: &ethpb.Checkpoint{Root: params.BeaconConfig().ZeroHash[:]},
 				Target: &ethpb.Checkpoint{Root: params.BeaconConfig().ZeroHash[:]},
 			},
-			inputDelay: primitives.Slot(math.IntegerSquareRoot(uint64(cfg.SlotsPerEpoch)) - 1),
+			inputDelay: types.Slot(math.IntegerSquareRoot(uint64(cfg.SlotsPerEpoch)) - 1),
 			participationIndices: map[uint8]bool{
 				sourceFlagIndex: true,
-				targetFlagIndex: true,
-			},
-		},
-		{
-			name: "participated source and target with delay",
-			inputState: func() state.BeaconState {
-				return beaconState
-			}(),
-			inputData: &ethpb.AttestationData{
-				Source: &ethpb.Checkpoint{Root: params.BeaconConfig().ZeroHash[:]},
-				Target: &ethpb.Checkpoint{Root: params.BeaconConfig().ZeroHash[:]},
-			},
-			inputDelay: params.BeaconConfig().SlotsPerEpoch + 1,
-			participationIndices: map[uint8]bool{
-				targetFlagIndex: true,
-			},
-		},
-		{
-			name: "participated source and target with delay in deneb",
-			inputState: func() state.BeaconState {
-				return denebState
-			}(),
-			inputData: &ethpb.AttestationData{
-				Source: &ethpb.Checkpoint{Root: params.BeaconConfig().ZeroHash[:]},
-				Target: &ethpb.Checkpoint{Root: params.BeaconConfig().ZeroHash[:]},
-			},
-			inputDelay: params.BeaconConfig().SlotsPerEpoch + 1,
-			participationIndices: map[uint8]bool{
 				targetFlagIndex: true,
 			},
 		},
@@ -727,6 +696,7 @@ func TestAttestationParticipationFlagIndices(t *testing.T) {
 			},
 		},
 	}
+
 	for _, test := range tests {
 		flagIndices, err := altair.AttestationParticipationFlagIndices(test.inputState, test.inputData, test.inputDelay)
 		require.NoError(t, err)

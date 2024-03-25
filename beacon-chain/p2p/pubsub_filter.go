@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/network/forks"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/encoder"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/network/forks"
 )
 
 var _ pubsub.SubscriptionFilter = (*Service)(nil)
@@ -52,22 +52,11 @@ func (s *Service) CanSubscribe(topic string) bool {
 		log.WithError(err).Error("Could not determine Bellatrix fork digest")
 		return false
 	}
-	capellaForkDigest, err := forks.ForkDigestFromEpoch(params.BeaconConfig().CapellaForkEpoch, s.genesisValidatorsRoot)
-	if err != nil {
-		log.WithError(err).Error("Could not determine Capella fork digest")
-		return false
-	}
-	denebForkDigest, err := forks.ForkDigestFromEpoch(params.BeaconConfig().DenebForkEpoch, s.genesisValidatorsRoot)
-	if err != nil {
-		log.WithError(err).Error("Could not determine Deneb fork digest")
-		return false
-	}
+
 	switch parts[2] {
 	case fmt.Sprintf("%x", phase0ForkDigest):
 	case fmt.Sprintf("%x", altairForkDigest):
 	case fmt.Sprintf("%x", bellatrixForkDigest):
-	case fmt.Sprintf("%x", capellaForkDigest):
-	case fmt.Sprintf("%x", denebForkDigest):
 	default:
 		return false
 	}

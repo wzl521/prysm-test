@@ -1,10 +1,9 @@
 package slice
 
 import (
-	"fmt"
 	"strings"
 
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
 )
 
 // SubsetUint64 returns true if the first array is
@@ -297,12 +296,11 @@ func SplitCommaSeparated(arr []string) []string {
 //
 // Spec pseudocode definition:
 // def get_split_offset(list_size: int, chunks: int, index: int) -> int:
-//
-//	"""
-//	Returns a value such that for a list L, chunk count k and index i,
-//	split(L, k)[i] == L[get_split_offset(len(L), k, i): get_split_offset(len(L), k, i+1)]
-//	"""
-//	return (list_size * index) // chunks
+//     """
+//     Returns a value such that for a list L, chunk count k and index i,
+//     split(L, k)[i] == L[get_split_offset(len(L), k, i): get_split_offset(len(L), k, i+1)]
+//     """
+//     return (list_size * index) // chunks
 func SplitOffset(listSize, chunks, index uint64) uint64 {
 	return (listSize * index) / chunks
 }
@@ -311,15 +309,15 @@ func SplitOffset(listSize, chunks, index uint64) uint64 {
 // complexity of approximately O(n) leveraging a map to
 // check for element existence off by a constant factor
 // of underlying map efficiency.
-func IntersectionSlot(s ...[]primitives.Slot) []primitives.Slot {
+func IntersectionSlot(s ...[]types.Slot) []types.Slot {
 	if len(s) == 0 {
-		return []primitives.Slot{}
+		return []types.Slot{}
 	}
 	if len(s) == 1 {
 		return s[0]
 	}
-	intersect := make([]primitives.Slot, 0)
-	m := make(map[primitives.Slot]int)
+	intersect := make([]types.Slot, 0)
+	m := make(map[types.Slot]int)
 	for _, k := range s[0] {
 		m[k] = 1
 	}
@@ -341,9 +339,9 @@ func IntersectionSlot(s ...[]primitives.Slot) []primitives.Slot {
 // not in slice a with time complexity of approximately
 // O(n) leveraging a map to check for element existence
 // off by a constant factor of underlying map efficiency.
-func NotSlot(a, b []primitives.Slot) []primitives.Slot {
-	set := make([]primitives.Slot, 0)
-	m := make(map[primitives.Slot]bool)
+func NotSlot(a, b []types.Slot) []types.Slot {
+	set := make([]types.Slot, 0)
+	m := make(map[types.Slot]bool)
 
 	for i := 0; i < len(a); i++ {
 		m[a[i]] = true
@@ -357,7 +355,7 @@ func NotSlot(a, b []primitives.Slot) []primitives.Slot {
 }
 
 // IsInSlots returns true if a is in b and False otherwise.
-func IsInSlots(a primitives.Slot, b []primitives.Slot) bool {
+func IsInSlots(a types.Slot, b []types.Slot) bool {
 	for _, v := range b {
 		if a == v {
 			return true
@@ -382,22 +380,4 @@ func Unique[T comparable](a []T) []T {
 		}
 	}
 	return result[:end]
-}
-
-// Reverse reverses any slice in place
-// Taken from https://github.com/faiface/generics/blob/8cf65f0b43803410724d8c671cb4d328543ba07d/examples/sliceutils/sliceutils.go
-func Reverse[E any](s []E) []E {
-	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
-		s[i], s[j] = s[j], s[i]
-	}
-	return s
-}
-
-// VerifyMaxLength takes a slice and a maximum length and validates the length.
-func VerifyMaxLength[T any](v []T, max int) error {
-	l := len(v)
-	if l > max {
-		return fmt.Errorf("length of %d exceeds max of %d", l, max)
-	}
-	return nil
 }

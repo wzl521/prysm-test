@@ -1,17 +1,19 @@
 package history
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/pkg/errors"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/monitoring/progress"
-	"github.com/prysmaticlabs/prysm/v5/validator/db"
-	"github.com/prysmaticlabs/prysm/v5/validator/slashing-protection-history/format"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/monitoring/progress"
+	"github.com/prysmaticlabs/prysm/v3/validator/db"
+	"github.com/prysmaticlabs/prysm/v3/validator/slashing-protection-history/format"
 )
 
 // ExportStandardProtectionJSON extracts all slashing protection data from a validator database
@@ -156,8 +158,8 @@ func signedAttestationsByPubKey(ctx context.Context, validatorDB db.Database, pu
 			}
 		}
 		var root string
-		if len(att.SigningRoot) != 0 {
-			root, err = rootToHexString(att.SigningRoot)
+		if !bytes.Equal(att.SigningRoot[:], params.BeaconConfig().ZeroHash[:]) {
+			root, err = rootToHexString(att.SigningRoot[:])
 			if err != nil {
 				return nil, errors.Wrap(err, "could not convert signing root to hex string")
 			}

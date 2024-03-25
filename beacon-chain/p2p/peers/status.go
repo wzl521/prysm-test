@@ -29,22 +29,22 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/p2p/enr"
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers/peerdata"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers/scorers"
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/rand"
-	pmath "github.com/prysmaticlabs/prysm/v5/math"
-	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/metadata"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/peers/peerdata"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/peers/scorers"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/rand"
+	pmath "github.com/prysmaticlabs/prysm/v3/math"
+	pb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/metadata"
+	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 )
 
 const (
@@ -335,10 +335,6 @@ func (p *Status) IsBad(pid peer.ID) bool {
 
 // isBad is the lock-free version of IsBad.
 func (p *Status) isBad(pid peer.ID) bool {
-	// Do not disconnect from trusted peers.
-	if p.store.IsTrustedPeer(pid) {
-		return false
-	}
 	return p.isfromBadIP(pid) || p.scorers.IsBadPeerNoLock(pid)
 }
 
@@ -560,9 +556,6 @@ func (p *Status) Prune() {
 	notBadPeer := func(pid peer.ID) bool {
 		return !p.isBad(pid)
 	}
-	notTrustedPeer := func(pid peer.ID) bool {
-		return !p.isTrustedPeers(pid)
-	}
 	type peerResp struct {
 		pid   peer.ID
 		score float64
@@ -570,8 +563,7 @@ func (p *Status) Prune() {
 	peersToPrune := make([]*peerResp, 0)
 	// Select disconnected peers with a smaller bad response count.
 	for pid, peerData := range p.store.Peers() {
-		// Should not prune trusted peer or prune the peer dara and unset trusted peer.
-		if peerData.ConnState == PeerDisconnected && notBadPeer(pid) && notTrustedPeer(pid) {
+		if peerData.ConnState == PeerDisconnected && notBadPeer(pid) {
 			peersToPrune = append(peersToPrune, &peerResp{
 				pid:   pid,
 				score: p.Scorers().ScoreNoLock(pid),
@@ -612,9 +604,6 @@ func (p *Status) deprecatedPrune() {
 	notBadPeer := func(peerData *peerdata.PeerData) bool {
 		return peerData.BadResponses < p.scorers.BadResponsesScorer().Params().Threshold
 	}
-	notTrustedPeer := func(pid peer.ID) bool {
-		return !p.isTrustedPeers(pid)
-	}
 	type peerResp struct {
 		pid     peer.ID
 		badResp int
@@ -622,8 +611,7 @@ func (p *Status) deprecatedPrune() {
 	peersToPrune := make([]*peerResp, 0)
 	// Select disconnected peers with a smaller bad response count.
 	for pid, peerData := range p.store.Peers() {
-		// Should not prune trusted peer or prune the peer dara and unset trusted peer.
-		if peerData.ConnState == PeerDisconnected && notBadPeer(peerData) && notTrustedPeer(pid) {
+		if peerData.ConnState == PeerDisconnected && notBadPeer(peerData) {
 			peersToPrune = append(peersToPrune, &peerResp{
 				pid:     pid,
 				badResp: peerData.BadResponses,
@@ -657,11 +645,11 @@ func (p *Status) deprecatedPrune() {
 // Ideally, all peers would be reporting the same finalized epoch but some may be behind due to their
 // own latency, or because of their finalized epoch at the time we queried them.
 // Returns epoch number and list of peers that are at or beyond that epoch.
-func (p *Status) BestFinalized(maxPeers int, ourFinalizedEpoch primitives.Epoch) (primitives.Epoch, []peer.ID) {
+func (p *Status) BestFinalized(maxPeers int, ourFinalizedEpoch types.Epoch) (types.Epoch, []peer.ID) {
 	connected := p.Connected()
-	finalizedEpochVotes := make(map[primitives.Epoch]uint64)
-	pidEpoch := make(map[peer.ID]primitives.Epoch, len(connected))
-	pidHead := make(map[peer.ID]primitives.Slot, len(connected))
+	finalizedEpochVotes := make(map[types.Epoch]uint64)
+	pidEpoch := make(map[peer.ID]types.Epoch, len(connected))
+	pidHead := make(map[peer.ID]types.Slot, len(connected))
 	potentialPIDs := make([]peer.ID, 0, len(connected))
 	for _, pid := range connected {
 		peerChainState, err := p.ChainState(pid)
@@ -674,7 +662,7 @@ func (p *Status) BestFinalized(maxPeers int, ourFinalizedEpoch primitives.Epoch)
 	}
 
 	// Select the target epoch, which is the epoch most peers agree upon.
-	var targetEpoch primitives.Epoch
+	var targetEpoch types.Epoch
 	var mostVotes uint64
 	for epoch, count := range finalizedEpochVotes {
 		if count > mostVotes || (count == mostVotes && epoch > targetEpoch) {
@@ -709,11 +697,11 @@ func (p *Status) BestFinalized(maxPeers int, ourFinalizedEpoch primitives.Epoch)
 
 // BestNonFinalized returns the highest known epoch, higher than ours,
 // and is shared by at least minPeers.
-func (p *Status) BestNonFinalized(minPeers int, ourHeadEpoch primitives.Epoch) (primitives.Epoch, []peer.ID) {
+func (p *Status) BestNonFinalized(minPeers int, ourHeadEpoch types.Epoch) (types.Epoch, []peer.ID) {
 	connected := p.Connected()
-	epochVotes := make(map[primitives.Epoch]uint64)
-	pidEpoch := make(map[peer.ID]primitives.Epoch, len(connected))
-	pidHead := make(map[peer.ID]primitives.Slot, len(connected))
+	epochVotes := make(map[types.Epoch]uint64)
+	pidEpoch := make(map[peer.ID]types.Epoch, len(connected))
+	pidHead := make(map[peer.ID]types.Slot, len(connected))
 	potentialPIDs := make([]peer.ID, 0, len(connected))
 
 	ourHeadSlot := params.BeaconConfig().SlotsPerEpoch.Mul(uint64(ourHeadEpoch))
@@ -729,7 +717,7 @@ func (p *Status) BestNonFinalized(minPeers int, ourHeadEpoch primitives.Epoch) (
 	}
 
 	// Select the target epoch, which has enough peers' votes (>= minPeers).
-	var targetEpoch primitives.Epoch
+	var targetEpoch types.Epoch
 	for epoch, votes := range epochVotes {
 		if votes >= uint64(minPeers) && targetEpoch < epoch {
 			targetEpoch = epoch
@@ -781,7 +769,7 @@ func (p *Status) PeersToPrune() []peer.ID {
 	// Select connected and inbound peers to prune.
 	for pid, peerData := range p.store.Peers() {
 		if peerData.ConnState == PeerConnected &&
-			peerData.Direction == network.DirInbound && !p.store.IsTrustedPeer(pid) {
+			peerData.Direction == network.DirInbound {
 			peersToPrune = append(peersToPrune, &peerResp{
 				pid:   pid,
 				score: p.scorers.ScoreNoLock(pid),
@@ -847,7 +835,7 @@ func (p *Status) deprecatedPeersToPrune() []peer.ID {
 	// Select connected and inbound peers to prune.
 	for pid, peerData := range p.store.Peers() {
 		if peerData.ConnState == PeerConnected &&
-			peerData.Direction == network.DirInbound && !p.store.IsTrustedPeer(pid) {
+			peerData.Direction == network.DirInbound {
 			peersToPrune = append(peersToPrune, &peerResp{
 				pid:     pid,
 				badResp: peerData.BadResponses,
@@ -890,10 +878,10 @@ func (p *Status) deprecatedPeersToPrune() []peer.ID {
 }
 
 // HighestEpoch returns the highest epoch reported epoch amongst peers.
-func (p *Status) HighestEpoch() primitives.Epoch {
+func (p *Status) HighestEpoch() types.Epoch {
 	p.store.RLock()
 	defer p.store.RUnlock()
-	var highestSlot primitives.Slot
+	var highestSlot types.Slot
 	for _, peerData := range p.store.Peers() {
 		if peerData != nil && peerData.ChainState != nil && peerData.ChainState.HeadSlot > highestSlot {
 			highestSlot = peerData.ChainState.HeadSlot
@@ -910,40 +898,6 @@ func (p *Status) ConnectedPeerLimit() uint64 {
 		return 0
 	}
 	return uint64(maxLim) - maxLimitBuffer
-}
-
-// SetTrustedPeers sets our trusted peer set into
-// our peerstore.
-func (p *Status) SetTrustedPeers(peers []peer.ID) {
-	p.store.Lock()
-	defer p.store.Unlock()
-	p.store.SetTrustedPeers(peers)
-}
-
-// GetTrustedPeers returns a list of all trusted peers' ids
-func (p *Status) GetTrustedPeers() []peer.ID {
-	p.store.RLock()
-	defer p.store.RUnlock()
-	return p.store.GetTrustedPeers()
-}
-
-// DeleteTrustedPeers removes peers from trusted peer set
-func (p *Status) DeleteTrustedPeers(peers []peer.ID) {
-	p.store.Lock()
-	defer p.store.Unlock()
-	p.store.DeleteTrustedPeers(peers)
-}
-
-// IsTrustedPeers returns if given peer is a Trusted peer
-func (p *Status) IsTrustedPeers(pid peer.ID) bool {
-	p.store.RLock()
-	defer p.store.RUnlock()
-	return p.isTrustedPeers(pid)
-}
-
-// isTrustedPeers is the lock-free version of IsTrustedPeers.
-func (p *Status) isTrustedPeers(pid peer.ID) bool {
-	return p.store.IsTrustedPeer(pid)
 }
 
 // this method assumes the store lock is acquired before

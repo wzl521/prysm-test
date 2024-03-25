@@ -6,27 +6,26 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/p2p/enr"
+	core "github.com/libp2p/go-libp2p-core"
+	"github.com/libp2p/go-libp2p-core/control"
+	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	core "github.com/libp2p/go-libp2p/core"
-	"github.com/libp2p/go-libp2p/core/control"
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/blank"
 	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 	"github.com/multiformats/go-multiaddr"
 	ssz "github.com/prysmaticlabs/fastssz"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers/scorers"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/metadata"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/encoder"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/peers"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/peers/scorers"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/metadata"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
 )
@@ -42,7 +41,7 @@ type TestP2P struct {
 	BHost           host.Host
 	pubsub          *pubsub.PubSub
 	joinedTopics    map[string]*pubsub.Topic
-	BroadcastCalled atomic.Bool
+	BroadcastCalled bool
 	DelaySend       bool
 	Digest          [4]byte
 	peers           *peers.Status
@@ -52,7 +51,7 @@ type TestP2P struct {
 // NewTestP2P initializes a new p2p test service.
 func NewTestP2P(t *testing.T) *TestP2P {
 	ctx := context.Background()
-	h := bhost.NewBlankHost(swarmt.GenSwarm(t, swarmt.OptDisableQUIC))
+	h := bhost.NewBlankHost(swarmt.GenSwarm(t))
 	ps, err := pubsub.NewFloodSub(ctx, h,
 		pubsub.WithMessageSigning(false),
 		pubsub.WithStrictSignatureVerification(false),
@@ -161,25 +160,19 @@ func (p *TestP2P) ReceivePubSub(topic string, msg proto.Message) {
 
 // Broadcast a message.
 func (p *TestP2P) Broadcast(_ context.Context, _ proto.Message) error {
-	p.BroadcastCalled.Store(true)
+	p.BroadcastCalled = true
 	return nil
 }
 
 // BroadcastAttestation broadcasts an attestation.
 func (p *TestP2P) BroadcastAttestation(_ context.Context, _ uint64, _ *ethpb.Attestation) error {
-	p.BroadcastCalled.Store(true)
+	p.BroadcastCalled = true
 	return nil
 }
 
 // BroadcastSyncCommitteeMessage broadcasts a sync committee message.
 func (p *TestP2P) BroadcastSyncCommitteeMessage(_ context.Context, _ uint64, _ *ethpb.SyncCommitteeMessage) error {
-	p.BroadcastCalled.Store(true)
-	return nil
-}
-
-// BroadcastBlob broadcasts a blob for mock.
-func (p *TestP2P) BroadcastBlob(context.Context, uint64, *ethpb.BlobSidecar) error {
-	p.BroadcastCalled.Store(true)
+	p.BroadcastCalled = true
 	return nil
 }
 
@@ -279,7 +272,7 @@ func (p *TestP2P) AddConnectionHandler(f, _ func(ctx context.Context, id peer.ID
 
 				p.peers.SetConnectionState(conn.RemotePeer(), peers.PeerConnecting)
 				if err := f(ctx, conn.RemotePeer()); err != nil {
-					logrus.WithError(err).Error("Could not send successful hello rpc request")
+					logrus.WithError(err).Error("Could not send succesful hello rpc request")
 					if err := p.Disconnect(conn.RemotePeer()); err != nil {
 						logrus.WithError(err).Errorf("Unable to close peer %s", conn.RemotePeer())
 					}

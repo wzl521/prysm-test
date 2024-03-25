@@ -4,19 +4,18 @@ import (
 	"context"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/blocks"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
-	testDB "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/testing"
-	doublylinkedtree "github.com/prysmaticlabs/prysm/v5/beacon-chain/forkchoice/doubly-linked-tree"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	consensusblocks "github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/blocks"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
+	testDB "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/testing"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	consensusblocks "github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/runtime/version"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -36,15 +35,15 @@ func TestReplayBlocks_AllSkipSlots(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, beaconState.SetSlashings(make([]uint64, params.BeaconConfig().EpochsPerSlashingsVector)))
 	cp := beaconState.CurrentJustifiedCheckpoint()
-	var mockRoot [32]byte
+	mockRoot := [32]byte{}
 	copy(mockRoot[:], "hello-world")
 	cp.Root = mockRoot[:]
 	require.NoError(t, beaconState.SetCurrentJustifiedCheckpoint(cp))
 	require.NoError(t, beaconState.AppendCurrentEpochAttestations(&ethpb.PendingAttestation{}))
 
-	service := New(beaconDB, doublylinkedtree.New())
+	service := New(beaconDB)
 	targetSlot := params.BeaconConfig().SlotsPerEpoch - 1
-	newState, err := service.replayBlocks(context.Background(), beaconState, []interfaces.ReadOnlySignedBeaconBlock{}, targetSlot)
+	newState, err := service.replayBlocks(context.Background(), beaconState, []interfaces.SignedBeaconBlock{}, targetSlot)
 	require.NoError(t, err)
 	assert.Equal(t, targetSlot, newState.Slot(), "Did not advance slots")
 }
@@ -65,15 +64,15 @@ func TestReplayBlocks_SameSlot(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, beaconState.SetSlashings(make([]uint64, params.BeaconConfig().EpochsPerSlashingsVector)))
 	cp := beaconState.CurrentJustifiedCheckpoint()
-	var mockRoot [32]byte
+	mockRoot := [32]byte{}
 	copy(mockRoot[:], "hello-world")
 	cp.Root = mockRoot[:]
 	require.NoError(t, beaconState.SetCurrentJustifiedCheckpoint(cp))
 	require.NoError(t, beaconState.AppendCurrentEpochAttestations(&ethpb.PendingAttestation{}))
 
-	service := New(beaconDB, doublylinkedtree.New())
+	service := New(beaconDB)
 	targetSlot := beaconState.Slot()
-	newState, err := service.replayBlocks(context.Background(), beaconState, []interfaces.ReadOnlySignedBeaconBlock{}, targetSlot)
+	newState, err := service.replayBlocks(context.Background(), beaconState, []interfaces.SignedBeaconBlock{}, targetSlot)
 	require.NoError(t, err)
 	assert.Equal(t, targetSlot, newState.Slot(), "Did not advance slots")
 }
@@ -95,19 +94,19 @@ func TestReplayBlocks_LowerSlotBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, beaconState.SetSlashings(make([]uint64, params.BeaconConfig().EpochsPerSlashingsVector)))
 	cp := beaconState.CurrentJustifiedCheckpoint()
-	var mockRoot [32]byte
+	mockRoot := [32]byte{}
 	copy(mockRoot[:], "hello-world")
 	cp.Root = mockRoot[:]
 	require.NoError(t, beaconState.SetCurrentJustifiedCheckpoint(cp))
 	require.NoError(t, beaconState.AppendCurrentEpochAttestations(&ethpb.PendingAttestation{}))
 
-	service := New(beaconDB, doublylinkedtree.New())
+	service := New(beaconDB)
 	targetSlot := beaconState.Slot()
 	b := util.NewBeaconBlock()
 	b.Block.Slot = beaconState.Slot() - 1
 	wsb, err := consensusblocks.NewSignedBeaconBlock(b)
 	require.NoError(t, err)
-	newState, err := service.replayBlocks(context.Background(), beaconState, []interfaces.ReadOnlySignedBeaconBlock{wsb}, targetSlot)
+	newState, err := service.replayBlocks(context.Background(), beaconState, []interfaces.SignedBeaconBlock{wsb}, targetSlot)
 	require.NoError(t, err)
 	assert.Equal(t, targetSlot, newState.Slot(), "Did not advance slots")
 }
@@ -131,24 +130,22 @@ func TestReplayBlocks_ThroughForkBoundary(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	service := New(testDB.SetupDB(t), doublylinkedtree.New())
+	service := New(testDB.SetupDB(t))
 	targetSlot := params.BeaconConfig().SlotsPerEpoch
-	newState, err := service.replayBlocks(context.Background(), beaconState, []interfaces.ReadOnlySignedBeaconBlock{}, targetSlot)
+	newState, err := service.replayBlocks(context.Background(), beaconState, []interfaces.SignedBeaconBlock{}, targetSlot)
 	require.NoError(t, err)
 
 	// Verify state is version Altair.
 	assert.Equal(t, version.Altair, newState.Version())
 }
 
-func TestReplayBlocks_ThroughCapellaForkBoundary(t *testing.T) {
+func TestReplayBlocks_ThroughBellatrixForkBoundary(t *testing.T) {
 	params.SetupTestConfigCleanup(t)
 	bCfg := params.BeaconConfig().Copy()
 	bCfg.AltairForkEpoch = 1
 	bCfg.ForkVersionSchedule[bytesutil.ToBytes4(bCfg.AltairForkVersion)] = 1
 	bCfg.BellatrixForkEpoch = 2
 	bCfg.ForkVersionSchedule[bytesutil.ToBytes4(bCfg.BellatrixForkVersion)] = 2
-	bCfg.CapellaForkEpoch = 3
-	bCfg.ForkVersionSchedule[bytesutil.ToBytes4(bCfg.CapellaForkVersion)] = 3
 	params.OverrideBeaconConfig(bCfg)
 
 	beaconState, _ := util.DeterministicGenesisState(t, 32)
@@ -163,20 +160,13 @@ func TestReplayBlocks_ThroughCapellaForkBoundary(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	service := New(testDB.SetupDB(t), doublylinkedtree.New())
+	service := New(testDB.SetupDB(t))
 	targetSlot := params.BeaconConfig().SlotsPerEpoch * 2
-	newState, err := service.replayBlocks(context.Background(), beaconState, []interfaces.ReadOnlySignedBeaconBlock{}, targetSlot)
+	newState, err := service.replayBlocks(context.Background(), beaconState, []interfaces.SignedBeaconBlock{}, targetSlot)
 	require.NoError(t, err)
 
-	// Verify state is version Bellatrix.
+	// Verify state is version Altair.
 	assert.Equal(t, version.Bellatrix, newState.Version())
-
-	targetSlot = params.BeaconConfig().SlotsPerEpoch * 3
-	newState, err = service.replayBlocks(context.Background(), newState, []interfaces.ReadOnlySignedBeaconBlock{}, targetSlot)
-	require.NoError(t, err)
-
-	// Verify state is version Capella.
-	assert.Equal(t, version.Capella, newState.Version())
 }
 
 func TestLoadBlocks_FirstBranch(t *testing.T) {
@@ -369,9 +359,8 @@ func TestLoadBlocks_BadStart(t *testing.T) {
 
 // tree1 constructs the following tree:
 // B0 - B1 - - B3 -- B5
-//
-//	\- B2 -- B4 -- B6 ----- B8
-//	                 \- B7
+//        \- B2 -- B4 -- B6 ----- B8
+//                         \- B7
 func tree1(t *testing.T, beaconDB db.Database, genesisRoot []byte) ([][32]byte, []*ethpb.SignedBeaconBlock, error) {
 	b0 := util.NewBeaconBlock()
 	b0.Block.Slot = 0
@@ -459,11 +448,10 @@ func tree1(t *testing.T, beaconDB db.Database, genesisRoot []byte) ([][32]byte, 
 
 // tree2 constructs the following tree:
 // B0 - B1
-//
-//	\- B2
-//	\- B2
-//	\- B2
-//	\- B2 -- B3
+//        \- B2
+//        \- B2
+//        \- B2
+//        \- B2 -- B3
 func tree2(t *testing.T, beaconDB db.Database, genesisRoot []byte) ([][32]byte, []*ethpb.SignedBeaconBlock, error) {
 	b0 := util.NewBeaconBlock()
 	b0.Block.Slot = 0
@@ -542,11 +530,10 @@ func tree2(t *testing.T, beaconDB db.Database, genesisRoot []byte) ([][32]byte, 
 
 // tree3 constructs the following tree:
 // B0 - B1
-//
-//	\- B2
-//	\- B2
-//	\- B2
-//	\- B2
+//        \- B2
+//        \- B2
+//        \- B2
+//        \- B2
 func tree3(t *testing.T, beaconDB db.Database, genesisRoot []byte) ([][32]byte, []*ethpb.SignedBeaconBlock, error) {
 	b0 := util.NewBeaconBlock()
 	b0.Block.Slot = 0
@@ -619,11 +606,10 @@ func tree3(t *testing.T, beaconDB db.Database, genesisRoot []byte) ([][32]byte, 
 
 // tree4 constructs the following tree:
 // B0
-//
-//	\- B2
-//	\- B2
-//	\- B2
-//	\- B2
+//   \- B2
+//   \- B2
+//   \- B2
+//   \- B2
 func tree4(t *testing.T, beaconDB db.Database, genesisRoot []byte) ([][32]byte, []*ethpb.SignedBeaconBlock, error) {
 	b0 := util.NewBeaconBlock()
 	b0.Block.Slot = 0

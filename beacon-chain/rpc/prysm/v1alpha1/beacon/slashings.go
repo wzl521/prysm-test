@@ -3,10 +3,10 @@ package beacon
 import (
 	"context"
 
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/container/slice"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/container/slice"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -18,7 +18,7 @@ func (bs *Server) SubmitProposerSlashing(
 	ctx context.Context,
 	req *ethpb.ProposerSlashing,
 ) (*ethpb.SubmitSlashingResponse, error) {
-	beaconState, err := bs.HeadFetcher.HeadStateReadOnly(ctx)
+	beaconState, err := bs.HeadFetcher.HeadState(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not retrieve head state: %v", err)
 	}
@@ -32,7 +32,7 @@ func (bs *Server) SubmitProposerSlashing(
 	}
 
 	return &ethpb.SubmitSlashingResponse{
-		SlashedIndices: []primitives.ValidatorIndex{req.Header_1.Header.ProposerIndex},
+		SlashedIndices: []types.ValidatorIndex{req.Header_1.Header.ProposerIndex},
 	}, nil
 }
 
@@ -43,7 +43,7 @@ func (bs *Server) SubmitAttesterSlashing(
 	ctx context.Context,
 	req *ethpb.AttesterSlashing,
 ) (*ethpb.SubmitSlashingResponse, error) {
-	beaconState, err := bs.HeadFetcher.HeadStateReadOnly(ctx)
+	beaconState, err := bs.HeadFetcher.HeadState(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not retrieve head state: %v", err)
 	}
@@ -56,9 +56,9 @@ func (bs *Server) SubmitAttesterSlashing(
 		}
 	}
 	indices := slice.IntersectionUint64(req.Attestation_1.AttestingIndices, req.Attestation_2.AttestingIndices)
-	slashedIndices := make([]primitives.ValidatorIndex, len(indices))
+	slashedIndices := make([]types.ValidatorIndex, len(indices))
 	for i, index := range indices {
-		slashedIndices[i] = primitives.ValidatorIndex(index)
+		slashedIndices[i] = types.ValidatorIndex(index)
 	}
 	return &ethpb.SubmitSlashingResponse{
 		SlashedIndices: slashedIndices,

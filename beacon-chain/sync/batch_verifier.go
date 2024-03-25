@@ -6,8 +6,9 @@ import (
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/monitoring/tracing"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/monitoring/tracing"
 	"go.opencensus.io/trace"
 )
 
@@ -50,7 +51,7 @@ func (s *Service) verifierRoutine() {
 }
 
 func (s *Service) validateWithBatchVerifier(ctx context.Context, message string, set *bls.SignatureBatch) (pubsub.ValidationResult, error) {
-	_, span := trace.StartSpan(ctx, "sync.validateWithBatchVerifier")
+	ctx, span := trace.StartSpan(ctx, "sync.validateWithBatchVerifier")
 	defer span.End()
 
 	resChan := make(chan error)
@@ -89,7 +90,9 @@ func verifyBatch(verifierBatch []*signatureVerifier) {
 	}
 	var verificationErr error
 
-	aggSet, verificationErr = performBatchAggregation(aggSet)
+	if features.Get().EnableBatchGossipAggregation {
+		aggSet, verificationErr = performBatchAggregation(aggSet)
+	}
 	if verificationErr == nil {
 		verified, err := aggSet.Verify()
 		switch {

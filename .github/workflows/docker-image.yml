@@ -2,8 +2,7 @@ name: Docker Image CI
 
 on:
   push:
-    branches:
-      - "main"
+    branches: [ version** ]
 
 jobs:
 
@@ -11,7 +10,7 @@ jobs:
 
     runs-on: ubuntu-latest
     env:
-      HAVE_DOCKERHUB_SECRET: ${{ secrets.ALI_DOCKER_HUB_PWD != '' && secrets.ALI_DOCKER_HUB_USN != '' }}
+      HAVE_DOCKERHUB_SECRET: ${{ secrets.DOCKERHUB_TOKEN != '' && secrets.DOCKERHUB_USERNAME != '' }}
 
     steps:
       -
@@ -27,13 +26,12 @@ jobs:
         name: Login to DockerHub
         uses: docker/login-action@v1
         with:
-          registry: ${{ secrets.ALI_DOCKER_HUB_REGISTRY }}
-          username: ${{ secrets.ALI_DOCKER_HUB_USN }}
-          password: ${{ secrets.ALI_DOCKER_HUB_PWD }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       -
         name: Build and push geth
         uses: docker/build-push-action@v2
         with:
           context: .
           push: true
-          tags: registry.cn-hangzhou.aliyuncs.com/jiaxing_mss/prysm:v5.0.1
+          tags: srt180/prysm:latest

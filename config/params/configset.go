@@ -1,11 +1,8 @@
 package params
 
 import (
-	"fmt"
-
 	"github.com/pkg/errors"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
 )
 
 var configs *configset
@@ -72,12 +69,7 @@ func (r *configset) add(c *BeaconChainConfig) error {
 	c.InitializeForkSchedule()
 	for v := range c.ForkVersionSchedule {
 		if n, exists := r.versionToName[v]; exists {
-			// determine the fork name for the colliding version
-			cfv := ConfigForkVersions(c)
-			versionId := cfv[v]
-			msg := fmt.Sprintf("version %#x for fork %s in config %s conflicts with existing config named=%s",
-				v, version.String(versionId), name, n)
-			return errors.Wrap(errCollisionFork, msg)
+			return errors.Wrapf(errCollisionFork, "config name=%s conflicts with existing config named=%s", name, n)
 		}
 		r.versionToName[v] = name
 	}
@@ -114,9 +106,6 @@ func (r *configset) replace(cfg *BeaconChainConfig) error {
 func (r *configset) replaceWithUndo(cfg *BeaconChainConfig) (func() error, error) {
 	name := cfg.ConfigName
 	prev := r.nameToConfig[name]
-	if prev != nil {
-		prev = prev.Copy()
-	}
 	if err := r.replace(cfg); err != nil {
 		return nil, err
 	}
@@ -145,11 +134,7 @@ func (r *configset) setActive(c *BeaconChainConfig) error {
 }
 
 func (r *configset) setActiveWithUndo(c *BeaconChainConfig) (func() error, error) {
-	if r.active == nil {
-		return nil, errors.Wrap(errCannotNullifyActive,
-			"active config is currently nil, refusing to construct undo method that will leave it nil again")
-	}
-	active := r.active.Copy()
+	active := r.active
 	r.active = c
 	undo, err := r.replaceWithUndo(c)
 	if err != nil {

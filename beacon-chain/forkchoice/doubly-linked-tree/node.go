@@ -5,18 +5,15 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	forkchoice2 "github.com/prysmaticlabs/prysm/v5/consensus-types/forkchoice"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	v1 "github.com/prysmaticlabs/prysm/v3/proto/eth/v1"
 )
 
-// ProcessAttestationsThreshold  is the number of seconds after which we
-// process attestations for the current slot
-const ProcessAttestationsThreshold = 10
-
 // applyWeightChanges recomputes the weight of the node passed as an argument and all of its descendants,
-// using the current balance stored in each node.
+// using the current balance stored in each node. This function requires a lock
+// in Store.nodesLock
 func (n *Node) applyWeightChanges(ctx context.Context) error {
 	// Recursively calling the children to sum their weights.
 	childrenWeight := uint64(0)
@@ -37,8 +34,8 @@ func (n *Node) applyWeightChanges(ctx context.Context) error {
 }
 
 // updateBestDescendant updates the best descendant of this node and its
-// children.
-func (n *Node) updateBestDescendant(ctx context.Context, justifiedEpoch, finalizedEpoch, currentEpoch primitives.Epoch) error {
+// children. This function assumes the caller has a lock on Store.nodesLock
+func (n *Node) updateBestDescendant(ctx context.Context, justifiedEpoch, finalizedEpoch, currentEpoch types.Epoch) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -57,7 +54,7 @@ func (n *Node) updateBestDescendant(ctx context.Context, justifiedEpoch, finaliz
 		if err := child.updateBestDescendant(ctx, justifiedEpoch, finalizedEpoch, currentEpoch); err != nil {
 			return err
 		}
-		childLeadsToViableHead := child.leadsToViableHead(justifiedEpoch, currentEpoch)
+		childLeadsToViableHead := child.leadsToViableHead(justifiedEpoch, finalizedEpoch, currentEpoch)
 		if childLeadsToViableHead && !hasViableDescendant {
 			// The child leads to a viable head, but the current
 			// parent's best child doesn't.
@@ -92,21 +89,24 @@ func (n *Node) updateBestDescendant(ctx context.Context, justifiedEpoch, finaliz
 // viableForHead returns true if the node is viable to head.
 // Any node with different finalized or justified epoch than
 // the ones in fork choice store should not be viable to head.
-func (n *Node) viableForHead(justifiedEpoch, currentEpoch primitives.Epoch) bool {
-	if justifiedEpoch == 0 {
-		return true
+func (n *Node) viableForHead(justifiedEpoch, finalizedEpoch, currentEpoch types.Epoch) bool {
+	justified := justifiedEpoch == n.justifiedEpoch || justifiedEpoch == 0
+	finalized := finalizedEpoch == n.finalizedEpoch || finalizedEpoch == 0
+	if features.Get().EnableDefensivePull && !justified && justifiedEpoch+1 == currentEpoch {
+		if n.unrealizedJustifiedEpoch+1 >= currentEpoch {
+			justified = true
+			finalized = true
+		}
 	}
-	// We use n.justifiedEpoch as the voting source because:
-	//   1. if this node is from current epoch, n.justifiedEpoch is the realized justification epoch.
-	//   2. if this node is from a previous epoch, n.justifiedEpoch has already been updated to the unrealized justification epoch.
-	return n.justifiedEpoch == justifiedEpoch || n.justifiedEpoch+2 >= currentEpoch
+
+	return justified && finalized
 }
 
-func (n *Node) leadsToViableHead(justifiedEpoch, currentEpoch primitives.Epoch) bool {
+func (n *Node) leadsToViableHead(justifiedEpoch, finalizedEpoch, currentEpoch types.Epoch) bool {
 	if n.bestDescendant == nil {
-		return n.viableForHead(justifiedEpoch, currentEpoch)
+		return n.viableForHead(justifiedEpoch, finalizedEpoch, currentEpoch)
 	}
-	return n.bestDescendant.viableForHead(justifiedEpoch, currentEpoch)
+	return n.bestDescendant.viableForHead(justifiedEpoch, finalizedEpoch, currentEpoch)
 }
 
 // setNodeAndParentValidated sets the current node and all the ancestors as validated (i.e. non-optimistic).
@@ -126,29 +126,8 @@ func (n *Node) setNodeAndParentValidated(ctx context.Context) error {
 	return n.parent.setNodeAndParentValidated(ctx)
 }
 
-// arrivedEarly returns whether this node was inserted before the first
-// threshold to orphan a block.
-// Note that genesisTime has seconds granularity, therefore we use a strict
-// inequality < here. For example a block that arrives 3.9999 seconds into the
-// slot will have secs = 3 below.
-func (n *Node) arrivedEarly(genesisTime uint64) (bool, error) {
-	secs, err := slots.SecondsSinceSlotStart(n.slot, genesisTime, n.timestamp)
-	votingWindow := params.BeaconConfig().SecondsPerSlot / params.BeaconConfig().IntervalsPerSlot
-	return secs < votingWindow, err
-}
-
-// arrivedAfterOrphanCheck returns whether this block was inserted after the
-// intermediate checkpoint to check for candidate of being orphaned.
-// Note that genesisTime has seconds granularity, therefore we use an
-// inequality >= here. For example a block that arrives 10.00001 seconds into the
-// slot will have secs = 10 below.
-func (n *Node) arrivedAfterOrphanCheck(genesisTime uint64) (bool, error) {
-	secs, err := slots.SecondsSinceSlotStart(n.slot, genesisTime, n.timestamp)
-	return secs >= ProcessAttestationsThreshold, err
-}
-
 // nodeTreeDump appends to the given list all the nodes descending from this one
-func (n *Node) nodeTreeDump(ctx context.Context, nodes []*forkchoice2.Node) ([]*forkchoice2.Node, error) {
+func (n *Node) nodeTreeDump(ctx context.Context, nodes []*v1.ForkChoiceNode) ([]*v1.ForkChoiceNode, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -156,9 +135,9 @@ func (n *Node) nodeTreeDump(ctx context.Context, nodes []*forkchoice2.Node) ([]*
 	if n.parent != nil {
 		parentRoot = n.parent.root
 	}
-	thisNode := &forkchoice2.Node{
+	thisNode := &v1.ForkChoiceNode{
 		Slot:                     n.slot,
-		BlockRoot:                n.root[:],
+		Root:                     n.root[:],
 		ParentRoot:               parentRoot[:],
 		JustifiedEpoch:           n.justifiedEpoch,
 		FinalizedEpoch:           n.finalizedEpoch,
@@ -167,13 +146,8 @@ func (n *Node) nodeTreeDump(ctx context.Context, nodes []*forkchoice2.Node) ([]*
 		Balance:                  n.balance,
 		Weight:                   n.weight,
 		ExecutionOptimistic:      n.optimistic,
-		ExecutionBlockHash:       n.payloadHash[:],
+		ExecutionPayload:         n.payloadHash[:],
 		Timestamp:                n.timestamp,
-	}
-	if n.optimistic {
-		thisNode.Validity = forkchoice2.Optimistic
-	} else {
-		thisNode.Validity = forkchoice2.Valid
 	}
 
 	nodes = append(nodes, thisNode)

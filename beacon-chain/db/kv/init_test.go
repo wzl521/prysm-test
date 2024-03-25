@@ -1,12 +1,8 @@
 package kv
 
 import (
-	"io"
-	"os"
-	"testing"
-
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/sirupsen/logrus"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
 )
 
 func init() {
@@ -14,10 +10,7 @@ func init() {
 	if err := params.SetActive(params.MainnetTestConfig()); err != nil {
 		panic(err)
 	}
-}
-
-func TestMain(m *testing.M) {
-	logrus.SetLevel(logrus.DebugLevel)
-	logrus.SetOutput(io.Discard)
-	os.Exit(m.Run())
+	features.Init(&features.Flags{
+		EnableOnlyBlindedBeaconBlocks: true,
+	})
 }

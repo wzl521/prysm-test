@@ -4,15 +4,14 @@ package slasherkv
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path"
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db/iface"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/io/file"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db/iface"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/io/file"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -88,9 +87,6 @@ func NewKVStore(ctx context.Context, dirPath string) (*Store, error) {
 
 // ClearDB removes the previously stored database in the data directory.
 func (s *Store) ClearDB() error {
-	if err := s.Close(); err != nil {
-		return fmt.Errorf("failed to close db: %w", err)
-	}
 	if _, err := os.Stat(s.databasePath); os.IsNotExist(err) {
 		return nil
 	}

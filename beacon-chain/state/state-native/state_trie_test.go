@@ -5,20 +5,21 @@ import (
 	"context"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	statenative "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	statenative "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/state-native"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
 func TestInitializeFromProto_Phase0(t *testing.T) {
+	features.Init(&features.Flags{EnableNativeState: true})
 	testState, _ := util.DeterministicGenesisState(t, 64)
-	pbState, err := statenative.ProtobufBeaconStatePhase0(testState.ToProtoUnsafe())
+	pbState, err := statenative.ProtobufBeaconStatePhase0(testState.InnerStateUnsafe())
 	require.NoError(t, err)
 	type test struct {
 		name  string
@@ -82,15 +83,18 @@ func TestInitializeFromProto_Altair(t *testing.T) {
 			name:  "empty state",
 			state: &ethpb.BeaconStateAltair{},
 		},
+		// TODO: Add full state. Blocked by testutil migration.
 	}
 	for _, tt := range initTests {
 		t.Run(tt.name, func(t *testing.T) {
+			features.Init(&features.Flags{EnableNativeState: true})
 			_, err := statenative.InitializeFromProtoAltair(tt.state)
 			if tt.error != "" {
 				require.ErrorContains(t, tt.error, err)
 			} else {
 				require.NoError(t, err)
 			}
+			features.Init(&features.Flags{EnableNativeState: false})
 		})
 	}
 }
@@ -121,91 +125,21 @@ func TestInitializeFromProto_Bellatrix(t *testing.T) {
 	}
 	for _, tt := range initTests {
 		t.Run(tt.name, func(t *testing.T) {
+			features.Init(&features.Flags{EnableNativeState: true})
 			_, err := statenative.InitializeFromProtoBellatrix(tt.state)
 			if tt.error != "" {
 				require.ErrorContains(t, tt.error, err)
 			} else {
 				require.NoError(t, err)
 			}
-		})
-	}
-}
-
-func TestInitializeFromProto_Capella(t *testing.T) {
-	type test struct {
-		name  string
-		state *ethpb.BeaconStateCapella
-		error string
-	}
-	initTests := []test{
-		{
-			name:  "nil state",
-			state: nil,
-			error: "received nil state",
-		},
-		{
-			name: "nil validators",
-			state: &ethpb.BeaconStateCapella{
-				Slot:       4,
-				Validators: nil,
-			},
-		},
-		{
-			name:  "empty state",
-			state: &ethpb.BeaconStateCapella{},
-		},
-	}
-	for _, tt := range initTests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := statenative.InitializeFromProtoCapella(tt.state)
-			if tt.error != "" {
-				require.ErrorContains(t, tt.error, err)
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestInitializeFromProto_Deneb(t *testing.T) {
-	type test struct {
-		name  string
-		state *ethpb.BeaconStateDeneb
-		error string
-	}
-	initTests := []test{
-		{
-			name:  "nil state",
-			state: nil,
-			error: "received nil state",
-		},
-		{
-			name: "nil validators",
-			state: &ethpb.BeaconStateDeneb{
-				Slot:       4,
-				Validators: nil,
-			},
-		},
-		{
-			name:  "empty state",
-			state: &ethpb.BeaconStateDeneb{},
-		},
-	}
-	for _, tt := range initTests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := statenative.InitializeFromProtoDeneb(tt.state)
-			if tt.error != "" {
-				require.ErrorContains(t, tt.error, err)
-			} else {
-				require.NoError(t, err)
-			}
+			features.Init(&features.Flags{EnableNativeState: false})
 		})
 	}
 }
 
 func TestInitializeFromProtoUnsafe_Phase0(t *testing.T) {
 	testState, _ := util.DeterministicGenesisState(t, 64)
-	pbState, err := statenative.ProtobufBeaconStatePhase0(testState.ToProtoUnsafe())
+	pbState, err := statenative.ProtobufBeaconStatePhase0(testState.InnerStateUnsafe())
 	require.NoError(t, err)
 	type test struct {
 		name  string
@@ -231,17 +165,19 @@ func TestInitializeFromProtoUnsafe_Phase0(t *testing.T) {
 	}
 	for _, tt := range initTests {
 		t.Run(tt.name, func(t *testing.T) {
+			features.Init(&features.Flags{EnableNativeState: true})
 			_, err := statenative.InitializeFromProtoUnsafePhase0(tt.state)
 			if tt.error != "" {
 				assert.ErrorContains(t, tt.error, err)
 			} else {
 				assert.NoError(t, err)
 			}
+			features.Init(&features.Flags{EnableNativeState: false})
 		})
 	}
 }
 
-func TestInitializeFromProtoUnsafe_Altair(t *testing.T) {
+func TestInitializeFromProtoUnsafe_Altair(_ *testing.T) {
 	type test struct {
 		name  string
 		state *ethpb.BeaconStateAltair
@@ -259,20 +195,12 @@ func TestInitializeFromProtoUnsafe_Altair(t *testing.T) {
 			name:  "empty state",
 			state: &ethpb.BeaconStateAltair{},
 		},
+		// TODO: Add full state. Blocked by testutil migration.
 	}
-	for _, tt := range initTests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := statenative.InitializeFromProtoUnsafeAltair(tt.state)
-			if tt.error != "" {
-				assert.ErrorContains(t, tt.error, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
+	_ = initTests
 }
 
-func TestInitializeFromProtoUnsafe_Bellatrix(t *testing.T) {
+func TestInitializeFromProtoUnsafe_Bellatrix(_ *testing.T) {
 	type test struct {
 		name  string
 		state *ethpb.BeaconStateBellatrix
@@ -290,79 +218,9 @@ func TestInitializeFromProtoUnsafe_Bellatrix(t *testing.T) {
 			name:  "empty state",
 			state: &ethpb.BeaconStateBellatrix{},
 		},
+		// TODO: Add full state. Blocked by testutil migration.
 	}
-	for _, tt := range initTests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := statenative.InitializeFromProtoUnsafeBellatrix(tt.state)
-			if tt.error != "" {
-				assert.ErrorContains(t, tt.error, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestInitializeFromProtoUnsafe_Capella(t *testing.T) {
-	type test struct {
-		name  string
-		state *ethpb.BeaconStateCapella
-		error string
-	}
-	initTests := []test{
-		{
-			name: "nil validators",
-			state: &ethpb.BeaconStateCapella{
-				Slot:       4,
-				Validators: nil,
-			},
-		},
-		{
-			name:  "empty state",
-			state: &ethpb.BeaconStateCapella{},
-		},
-	}
-	for _, tt := range initTests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := statenative.InitializeFromProtoUnsafeCapella(tt.state)
-			if tt.error != "" {
-				assert.ErrorContains(t, tt.error, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestInitializeFromProtoUnsafe_Deneb(t *testing.T) {
-	type test struct {
-		name  string
-		state *ethpb.BeaconStateDeneb
-		error string
-	}
-	initTests := []test{
-		{
-			name: "nil validators",
-			state: &ethpb.BeaconStateDeneb{
-				Slot:       4,
-				Validators: nil,
-			},
-		},
-		{
-			name:  "empty state",
-			state: &ethpb.BeaconStateDeneb{},
-		},
-	}
-	for _, tt := range initTests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := statenative.InitializeFromProtoUnsafeDeneb(tt.state)
-			if tt.error != "" {
-				assert.ErrorContains(t, tt.error, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
+	_ = initTests
 }
 
 func TestBeaconState_HashTreeRoot(t *testing.T) {
@@ -416,13 +274,14 @@ func TestBeaconState_HashTreeRoot(t *testing.T) {
 			assert.NoError(t, err)
 			root, err := testState.HashTreeRoot(context.Background())
 			if err == nil && tt.error != "" {
-				t.Errorf("Expected error, expected %v, received %v", tt.error, err)
+				t.Errorf("Expected error, expected %v, recevied %v", tt.error, err)
 			}
-			pbState, err := statenative.ProtobufBeaconStatePhase0(testState.ToProtoUnsafe())
+			features.Init(&features.Flags{EnableNativeState: true})
+			pbState, err := statenative.ProtobufBeaconStatePhase0(testState.InnerStateUnsafe())
 			require.NoError(t, err)
 			genericHTR, err := pbState.HashTreeRoot()
 			if err == nil && tt.error != "" {
-				t.Errorf("Expected error, expected %v, received %v", tt.error, err)
+				t.Errorf("Expected error, expected %v, recevied %v", tt.error, err)
 			}
 			assert.DeepNotEqual(t, []byte{}, root[:], "Received empty hash tree root")
 			assert.DeepEqual(t, genericHTR[:], root[:], "Expected hash tree root to match generic")
@@ -430,13 +289,15 @@ func TestBeaconState_HashTreeRoot(t *testing.T) {
 				t.Errorf("Expected HTR to change, received %#x == old %#x", root, oldHTR)
 			}
 			oldHTR = root[:]
+			features.Init(&features.Flags{EnableNativeState: false})
 		})
 	}
 }
 
 func BenchmarkBeaconState(b *testing.B) {
+	features.Init(&features.Flags{EnableNativeState: true})
 	testState, _ := util.DeterministicGenesisState(b, 16000)
-	pbState, err := statenative.ProtobufBeaconStatePhase0(testState.ToProtoUnsafe())
+	pbState, err := statenative.ProtobufBeaconStatePhase0(testState.InnerStateUnsafe())
 	require.NoError(b, err)
 
 	b.Run("Vectorized SHA256", func(b *testing.B) {
@@ -450,6 +311,7 @@ func BenchmarkBeaconState(b *testing.B) {
 		_, err := pbState.HashTreeRoot()
 		require.NoError(b, err)
 	})
+	features.Init(&features.Flags{EnableNativeState: false})
 }
 
 func TestBeaconState_HashTreeRoot_FieldTrie(t *testing.T) {
@@ -503,13 +365,14 @@ func TestBeaconState_HashTreeRoot_FieldTrie(t *testing.T) {
 			assert.NoError(t, err)
 			root, err := testState.HashTreeRoot(context.Background())
 			if err == nil && tt.error != "" {
-				t.Errorf("Expected error, expected %v, received %v", tt.error, err)
+				t.Errorf("Expected error, expected %v, recevied %v", tt.error, err)
 			}
-			pbState, err := statenative.ProtobufBeaconStatePhase0(testState.ToProtoUnsafe())
+			features.Init(&features.Flags{EnableNativeState: true})
+			pbState, err := statenative.ProtobufBeaconStatePhase0(testState.InnerStateUnsafe())
 			require.NoError(t, err)
 			genericHTR, err := pbState.HashTreeRoot()
 			if err == nil && tt.error != "" {
-				t.Errorf("Expected error, expected %v, received %v", tt.error, err)
+				t.Errorf("Expected error, expected %v, recevied %v", tt.error, err)
 			}
 			assert.DeepNotEqual(t, []byte{}, root[:], "Received empty hash tree root")
 			assert.DeepEqual(t, genericHTR[:], root[:], "Expected hash tree root to match generic")
@@ -517,6 +380,7 @@ func TestBeaconState_HashTreeRoot_FieldTrie(t *testing.T) {
 				t.Errorf("Expected HTR to change, received %#x == old %#x", root, oldHTR)
 			}
 			oldHTR = root[:]
+			features.Init(&features.Flags{EnableNativeState: false})
 		})
 	}
 }
@@ -536,7 +400,7 @@ func TestBeaconState_AppendValidator_DoesntMutateCopy(t *testing.T) {
 
 func TestBeaconState_ValidatorMutation_Phase0(t *testing.T) {
 	testState, _ := util.DeterministicGenesisState(t, 400)
-	pbState, err := statenative.ProtobufBeaconStatePhase0(testState.ToProtoUnsafe())
+	pbState, err := statenative.ProtobufBeaconStatePhase0(testState.InnerStateUnsafe())
 	require.NoError(t, err)
 	testState, err = statenative.InitializeFromProtoPhase0(pbState)
 	require.NoError(t, err)
@@ -565,7 +429,8 @@ func TestBeaconState_ValidatorMutation_Phase0(t *testing.T) {
 
 	rt, err := testState.HashTreeRoot(context.Background())
 	require.NoError(t, err)
-	pbState, err = statenative.ProtobufBeaconStatePhase0(testState.ToProtoUnsafe())
+	features.Init(&features.Flags{EnableNativeState: true})
+	pbState, err = statenative.ProtobufBeaconStatePhase0(testState.InnerStateUnsafe())
 	require.NoError(t, err)
 
 	copiedTestState, err := statenative.InitializeFromProtoPhase0(pbState)
@@ -589,7 +454,7 @@ func TestBeaconState_ValidatorMutation_Phase0(t *testing.T) {
 
 	rt, err = newState1.HashTreeRoot(context.Background())
 	require.NoError(t, err)
-	pbState, err = statenative.ProtobufBeaconStatePhase0(newState1.ToProtoUnsafe())
+	pbState, err = statenative.ProtobufBeaconStatePhase0(newState1.InnerStateUnsafe())
 	require.NoError(t, err)
 
 	copiedTestState, err = statenative.InitializeFromProtoPhase0(pbState)
@@ -602,8 +467,9 @@ func TestBeaconState_ValidatorMutation_Phase0(t *testing.T) {
 }
 
 func TestBeaconState_ValidatorMutation_Altair(t *testing.T) {
+	features.Init(&features.Flags{EnableNativeState: true})
 	testState, _ := util.DeterministicGenesisStateAltair(t, 400)
-	pbState, err := statenative.ProtobufBeaconStateAltair(testState.ToProtoUnsafe())
+	pbState, err := statenative.ProtobufBeaconStateAltair(testState.InnerStateUnsafe())
 	require.NoError(t, err)
 	testState, err = statenative.InitializeFromProtoAltair(pbState)
 	require.NoError(t, err)
@@ -632,7 +498,7 @@ func TestBeaconState_ValidatorMutation_Altair(t *testing.T) {
 
 	rt, err := testState.HashTreeRoot(context.Background())
 	require.NoError(t, err)
-	pbState, err = statenative.ProtobufBeaconStateAltair(testState.ToProtoUnsafe())
+	pbState, err = statenative.ProtobufBeaconStateAltair(testState.InnerStateUnsafe())
 	require.NoError(t, err)
 
 	copiedTestState, err := statenative.InitializeFromProtoAltair(pbState)
@@ -656,7 +522,7 @@ func TestBeaconState_ValidatorMutation_Altair(t *testing.T) {
 
 	rt, err = newState1.HashTreeRoot(context.Background())
 	require.NoError(t, err)
-	pbState, err = statenative.ProtobufBeaconStateAltair(newState1.ToProtoUnsafe())
+	pbState, err = statenative.ProtobufBeaconStateAltair(newState1.InnerStateUnsafe())
 	require.NoError(t, err)
 
 	copiedTestState, err = statenative.InitializeFromProtoAltair(pbState)
@@ -666,11 +532,13 @@ func TestBeaconState_ValidatorMutation_Altair(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, rt, rt2)
+	features.Init(&features.Flags{EnableNativeState: false})
 }
 
 func TestBeaconState_ValidatorMutation_Bellatrix(t *testing.T) {
+	features.Init(&features.Flags{EnableNativeState: true})
 	testState, _ := util.DeterministicGenesisStateBellatrix(t, 400)
-	pbState, err := statenative.ProtobufBeaconStateBellatrix(testState.ToProtoUnsafe())
+	pbState, err := statenative.ProtobufBeaconStateBellatrix(testState.InnerStateUnsafe())
 	require.NoError(t, err)
 	testState, err = statenative.InitializeFromProtoBellatrix(pbState)
 	require.NoError(t, err)
@@ -699,7 +567,7 @@ func TestBeaconState_ValidatorMutation_Bellatrix(t *testing.T) {
 
 	rt, err := testState.HashTreeRoot(context.Background())
 	require.NoError(t, err)
-	pbState, err = statenative.ProtobufBeaconStateBellatrix(testState.ToProtoUnsafe())
+	pbState, err = statenative.ProtobufBeaconStateBellatrix(testState.InnerStateUnsafe())
 	require.NoError(t, err)
 
 	copiedTestState, err := statenative.InitializeFromProtoBellatrix(pbState)
@@ -723,7 +591,7 @@ func TestBeaconState_ValidatorMutation_Bellatrix(t *testing.T) {
 
 	rt, err = newState1.HashTreeRoot(context.Background())
 	require.NoError(t, err)
-	pbState, err = statenative.ProtobufBeaconStateBellatrix(newState1.ToProtoUnsafe())
+	pbState, err = statenative.ProtobufBeaconStateBellatrix(newState1.InnerStateUnsafe())
 	require.NoError(t, err)
 
 	copiedTestState, err = statenative.InitializeFromProtoBellatrix(pbState)
@@ -733,42 +601,5 @@ func TestBeaconState_ValidatorMutation_Bellatrix(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, rt, rt2)
-}
-
-func TestBeaconState_InitializeInactivityScoresCorrectly_Deneb(t *testing.T) {
-	resetCfg := features.InitWithReset(&features.Flags{
-		EnableExperimentalState: true,
-	})
-	defer resetCfg()
-	st, _ := util.DeterministicGenesisStateDeneb(t, 200)
-	_, err := st.HashTreeRoot(context.Background())
-	require.NoError(t, err)
-	ic, err := st.InactivityScores()
-	require.NoError(t, err)
-	ic[10] = 10000
-	ic[100] = 1000
-
-	err = st.SetInactivityScores(ic)
-	require.NoError(t, err)
-
-	_, err = st.HashTreeRoot(context.Background())
-	require.NoError(t, err)
-
-	ic[150] = 2390239
-	err = st.SetInactivityScores(ic)
-	require.NoError(t, err)
-	rt, err := st.HashTreeRoot(context.Background())
-	require.NoError(t, err)
-
-	copiedSt, ok := st.ToProtoUnsafe().(*ethpb.BeaconStateDeneb)
-	if !ok {
-		t.Error("not ok")
-	}
-	newSt, err := statenative.InitializeFromProtoUnsafeDeneb(copiedSt)
-	require.NoError(t, err)
-
-	newRt, err := newSt.HashTreeRoot(context.Background())
-	require.NoError(t, err)
-
-	require.DeepSSZEqual(t, rt, newRt)
+	features.Init(&features.Flags{EnableNativeState: false})
 }

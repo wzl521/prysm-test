@@ -5,15 +5,16 @@ import (
 	"testing"
 
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/altair"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/epoch/precompute"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/altair"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/epoch/precompute"
+	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
+	v2 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v2"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func TestProcessJustificationAndFinalizationPreCompute_ConsecutiveEpochs(t *testing.T) {
@@ -39,7 +40,7 @@ func TestProcessJustificationAndFinalizationPreCompute_ConsecutiveEpochs(t *test
 		Balances:            []uint64{a, a, a, a}, // validator total balance should be 128000000000
 		BlockRoots:          blockRoots,
 	}
-	state, err := state_native.InitializeFromProtoPhase0(base)
+	state, err := v1.InitializeFromProto(base)
 	require.NoError(t, err)
 	attestedBalance := 4 * uint64(e) * 3 / 2
 	b := &precompute.Balance{PrevEpochTargetAttested: attestedBalance}
@@ -47,10 +48,10 @@ func TestProcessJustificationAndFinalizationPreCompute_ConsecutiveEpochs(t *test
 	require.NoError(t, err)
 	rt := [32]byte{byte(64)}
 	assert.DeepEqual(t, rt[:], newState.CurrentJustifiedCheckpoint().Root, "Unexpected justified root")
-	assert.Equal(t, primitives.Epoch(2), newState.CurrentJustifiedCheckpoint().Epoch, "Unexpected justified epoch")
-	assert.Equal(t, primitives.Epoch(0), newState.PreviousJustifiedCheckpoint().Epoch, "Unexpected previous justified epoch")
+	assert.Equal(t, types.Epoch(2), newState.CurrentJustifiedCheckpoint().Epoch, "Unexpected justified epoch")
+	assert.Equal(t, types.Epoch(0), newState.PreviousJustifiedCheckpoint().Epoch, "Unexpected previous justified epoch")
 	assert.DeepEqual(t, params.BeaconConfig().ZeroHash[:], newState.FinalizedCheckpoint().Root, "Unexpected finalized root")
-	assert.Equal(t, primitives.Epoch(0), newState.FinalizedCheckpointEpoch(), "Unexpected finalized epoch")
+	assert.Equal(t, types.Epoch(0), newState.FinalizedCheckpointEpoch(), "Unexpected finalized epoch")
 }
 
 func TestProcessJustificationAndFinalizationPreCompute_JustifyCurrentEpoch(t *testing.T) {
@@ -76,7 +77,7 @@ func TestProcessJustificationAndFinalizationPreCompute_JustifyCurrentEpoch(t *te
 		Balances:            []uint64{a, a, a, a}, // validator total balance should be 128000000000
 		BlockRoots:          blockRoots,
 	}
-	state, err := state_native.InitializeFromProtoPhase0(base)
+	state, err := v1.InitializeFromProto(base)
 	require.NoError(t, err)
 	attestedBalance := 4 * uint64(e) * 3 / 2
 	b := &precompute.Balance{PrevEpochTargetAttested: attestedBalance}
@@ -84,10 +85,10 @@ func TestProcessJustificationAndFinalizationPreCompute_JustifyCurrentEpoch(t *te
 	require.NoError(t, err)
 	rt := [32]byte{byte(64)}
 	assert.DeepEqual(t, rt[:], newState.CurrentJustifiedCheckpoint().Root, "Unexpected current justified root")
-	assert.Equal(t, primitives.Epoch(2), newState.CurrentJustifiedCheckpoint().Epoch, "Unexpected justified epoch")
-	assert.Equal(t, primitives.Epoch(0), newState.PreviousJustifiedCheckpoint().Epoch, "Unexpected previous justified epoch")
+	assert.Equal(t, types.Epoch(2), newState.CurrentJustifiedCheckpoint().Epoch, "Unexpected justified epoch")
+	assert.Equal(t, types.Epoch(0), newState.PreviousJustifiedCheckpoint().Epoch, "Unexpected previous justified epoch")
 	assert.DeepEqual(t, params.BeaconConfig().ZeroHash[:], newState.FinalizedCheckpoint().Root)
-	assert.Equal(t, primitives.Epoch(0), newState.FinalizedCheckpointEpoch(), "Unexpected finalized epoch")
+	assert.Equal(t, types.Epoch(0), newState.FinalizedCheckpointEpoch(), "Unexpected finalized epoch")
 }
 
 func TestProcessJustificationAndFinalizationPreCompute_JustifyPrevEpoch(t *testing.T) {
@@ -112,7 +113,7 @@ func TestProcessJustificationAndFinalizationPreCompute_JustifyPrevEpoch(t *testi
 		Balances:          []uint64{a, a, a, a}, // validator total balance should be 128000000000
 		BlockRoots:        blockRoots, FinalizedCheckpoint: &ethpb.Checkpoint{Root: make([]byte, fieldparams.RootLength)},
 	}
-	state, err := state_native.InitializeFromProtoPhase0(base)
+	state, err := v1.InitializeFromProto(base)
 	require.NoError(t, err)
 	attestedBalance := 4 * uint64(e) * 3 / 2
 	b := &precompute.Balance{PrevEpochTargetAttested: attestedBalance}
@@ -120,10 +121,10 @@ func TestProcessJustificationAndFinalizationPreCompute_JustifyPrevEpoch(t *testi
 	require.NoError(t, err)
 	rt := [32]byte{byte(64)}
 	assert.DeepEqual(t, rt[:], newState.CurrentJustifiedCheckpoint().Root, "Unexpected current justified root")
-	assert.Equal(t, primitives.Epoch(0), newState.PreviousJustifiedCheckpoint().Epoch, "Unexpected previous justified epoch")
-	assert.Equal(t, primitives.Epoch(2), newState.CurrentJustifiedCheckpoint().Epoch, "Unexpected justified epoch")
+	assert.Equal(t, types.Epoch(0), newState.PreviousJustifiedCheckpoint().Epoch, "Unexpected previous justified epoch")
+	assert.Equal(t, types.Epoch(2), newState.CurrentJustifiedCheckpoint().Epoch, "Unexpected justified epoch")
 	assert.DeepEqual(t, params.BeaconConfig().ZeroHash[:], newState.FinalizedCheckpoint().Root)
-	assert.Equal(t, primitives.Epoch(0), newState.FinalizedCheckpointEpoch(), "Unexpected finalized epoch")
+	assert.Equal(t, types.Epoch(0), newState.FinalizedCheckpointEpoch(), "Unexpected finalized epoch")
 }
 
 func TestUnrealizedCheckpoints(t *testing.T) {
@@ -138,16 +139,16 @@ func TestUnrealizedCheckpoints(t *testing.T) {
 	}
 	pjr := [32]byte{'p'}
 	cjr := [32]byte{'c'}
-	je := primitives.Epoch(3)
-	fe := primitives.Epoch(2)
+	je := types.Epoch(3)
+	fe := types.Epoch(2)
 	pjcp := &ethpb.Checkpoint{Root: pjr[:], Epoch: fe}
 	cjcp := &ethpb.Checkpoint{Root: cjr[:], Epoch: je}
 	fcp := &ethpb.Checkpoint{Root: pjr[:], Epoch: fe}
 	tests := []struct {
 		name                                 string
-		slot                                 primitives.Slot
+		slot                                 types.Slot
 		prevVals, currVals                   int
-		expectedJustified, expectedFinalized primitives.Epoch // The expected unrealized checkpoint epochs
+		expectedJustified, expectedFinalized types.Epoch // The expected unrealized checkpoint epochs
 	}{
 		{
 			"Not enough votes, keep previous justification",
@@ -236,7 +237,7 @@ func TestUnrealizedCheckpoints(t *testing.T) {
 				base.JustificationBits.SetBitAt(2, true)
 			}
 
-			state, err := state_native.InitializeFromProtoAltair(base)
+			state, err := v2.InitializeFromProto(base)
 			require.NoError(t, err)
 
 			_, _, err = altair.InitializePrecomputeValidators(context.Background(), state)
@@ -251,7 +252,7 @@ func TestUnrealizedCheckpoints(t *testing.T) {
 }
 
 func Test_ComputeCheckpoints_CantUpdateToLower(t *testing.T) {
-	st, err := state_native.InitializeFromProtoAltair(&ethpb.BeaconStateAltair{
+	st, err := v2.InitializeFromProto(&ethpb.BeaconStateAltair{
 		Slot: params.BeaconConfig().SlotsPerEpoch * 2,
 		CurrentJustifiedCheckpoint: &ethpb.Checkpoint{
 			Epoch: 2,
@@ -262,5 +263,5 @@ func Test_ComputeCheckpoints_CantUpdateToLower(t *testing.T) {
 	jb.SetBitAt(1, true)
 	cp, _, err := precompute.ComputeCheckpoints(st, jb)
 	require.NoError(t, err)
-	require.Equal(t, primitives.Epoch(2), cp.Epoch)
+	require.Equal(t, types.Epoch(2), cp.Epoch)
 }

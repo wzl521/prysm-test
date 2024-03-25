@@ -3,10 +3,10 @@ package accounts
 import (
 	"os"
 
-	"github.com/prysmaticlabs/prysm/v5/cmd"
-	"github.com/prysmaticlabs/prysm/v5/cmd/validator/flags"
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	"github.com/prysmaticlabs/prysm/v5/runtime/tos"
+	"github.com/prysmaticlabs/prysm/v3/cmd"
+	"github.com/prysmaticlabs/prysm/v3/cmd/validator/flags"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	"github.com/prysmaticlabs/prysm/v3/runtime/tos"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
@@ -17,7 +17,7 @@ var log = logrus.WithField("prefix", "accounts")
 var Commands = &cli.Command{
 	Name:     "accounts",
 	Category: "accounts",
-	Usage:    "Defines commands for interacting with Ethereum validator accounts.",
+	Usage:    "defines commands for interacting with Ethereum validator accounts",
 	Subcommands: []*cli.Command{
 		{
 			Name:        "delete",
@@ -28,8 +28,8 @@ var Commands = &cli.Command{
 				flags.DeletePublicKeysFlag,
 				features.Mainnet,
 				features.PraterTestnet,
+				features.RopstenTestnet,
 				features.SepoliaTestnet,
-				features.HoleskyTestnet,
 				cmd.AcceptTosFlag,
 			}),
 			Before: func(cliCtx *cli.Context) error {
@@ -54,6 +54,7 @@ var Commands = &cli.Command{
 			Flags: cmd.WrapFlags([]cli.Flag{
 				flags.WalletDirFlag,
 				flags.WalletPasswordFileFlag,
+				flags.ShowDepositDataFlag,
 				flags.ShowPrivateKeysFlag,
 				flags.ListValidatorIndices,
 				flags.BeaconRPCProviderFlag,
@@ -64,8 +65,8 @@ var Commands = &cli.Command{
 				flags.GrpcRetryDelayFlag,
 				features.Mainnet,
 				features.PraterTestnet,
+				features.RopstenTestnet,
 				features.SepoliaTestnet,
-				features.HoleskyTestnet,
 				cmd.AcceptTosFlag,
 			}),
 			Before: func(cliCtx *cli.Context) error {
@@ -98,8 +99,8 @@ var Commands = &cli.Command{
 				flags.BackupPasswordFile,
 				features.Mainnet,
 				features.PraterTestnet,
+				features.RopstenTestnet,
 				features.SepoliaTestnet,
-				features.HoleskyTestnet,
 				cmd.AcceptTosFlag,
 			}),
 			Before: func(cliCtx *cli.Context) error {
@@ -129,8 +130,8 @@ var Commands = &cli.Command{
 				flags.ImportPrivateKeyFileFlag,
 				features.Mainnet,
 				features.PraterTestnet,
+				features.RopstenTestnet,
 				features.SepoliaTestnet,
-				features.HoleskyTestnet,
 				cmd.AcceptTosFlag,
 			}),
 			Before: func(cliCtx *cli.Context) error {
@@ -158,22 +159,16 @@ var Commands = &cli.Command{
 				flags.AccountPasswordFileFlag,
 				flags.VoluntaryExitPublicKeysFlag,
 				flags.BeaconRPCProviderFlag,
-				flags.Web3SignerURLFlag,
-				flags.Web3SignerPublicValidatorKeysFlag,
-				flags.InteropNumValidators,
-				flags.InteropStartIndex,
 				cmd.GrpcMaxCallRecvMsgSizeFlag,
 				flags.CertFlag,
 				flags.GrpcHeadersFlag,
 				flags.GrpcRetriesFlag,
 				flags.GrpcRetryDelayFlag,
 				flags.ExitAllFlag,
-				flags.ForceExitFlag,
-				flags.VoluntaryExitJSONOutputPath,
 				features.Mainnet,
 				features.PraterTestnet,
+				features.RopstenTestnet,
 				features.SepoliaTestnet,
-				features.HoleskyTestnet,
 				cmd.AcceptTosFlag,
 			}),
 			Before: func(cliCtx *cli.Context) error {
@@ -186,8 +181,7 @@ var Commands = &cli.Command{
 				return features.ConfigureValidator(cliCtx)
 			},
 			Action: func(cliCtx *cli.Context) error {
-				log.Info("This command will be deprecated in the future in favor of `prysmctl validator exit`")
-				if err := Exit(cliCtx, os.Stdin); err != nil {
+				if err := accountsExit(cliCtx, os.Stdin); err != nil {
 					log.WithError(err).Fatal("Could not perform voluntary exit")
 				}
 				return nil

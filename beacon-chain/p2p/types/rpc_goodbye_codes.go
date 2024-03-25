@@ -1,11 +1,11 @@
 package types
 
 import (
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
 )
 
 // RPCGoodbyeCode represents goodbye code, used in sync package.
-type RPCGoodbyeCode = primitives.SSZUint64
+type RPCGoodbyeCode = types.SSZUint64
 
 const (
 	// Spec defined codes.

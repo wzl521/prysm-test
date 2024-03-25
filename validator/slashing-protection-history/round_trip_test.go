@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/validator/db/kv"
-	dbtest "github.com/prysmaticlabs/prysm/v5/validator/db/testing"
-	history "github.com/prysmaticlabs/prysm/v5/validator/slashing-protection-history"
-	"github.com/prysmaticlabs/prysm/v5/validator/slashing-protection-history/format"
-	slashtest "github.com/prysmaticlabs/prysm/v5/validator/testing"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/validator/db/kv"
+	dbtest "github.com/prysmaticlabs/prysm/v3/validator/db/testing"
+	history "github.com/prysmaticlabs/prysm/v3/validator/slashing-protection-history"
+	"github.com/prysmaticlabs/prysm/v3/validator/slashing-protection-history/format"
+	slashtest "github.com/prysmaticlabs/prysm/v3/validator/testing"
 )
 
 func TestImportExport_RoundTrip(t *testing.T) {
@@ -207,14 +207,10 @@ func TestImportInterchangeData_OK(t *testing.T) {
 
 		wantedAttsByRoot := make(map[[32]byte]*kv.AttestationRecord)
 		for _, att := range attestingHistory[i] {
-			var signingRoot [32]byte
-			copy(signingRoot[:], att.SigningRoot)
-			wantedAttsByRoot[signingRoot] = att
+			wantedAttsByRoot[att.SigningRoot] = att
 		}
 		for _, att := range receivedAttestingHistory {
-			var signingRoot [32]byte
-			copy(signingRoot[:], att.SigningRoot)
-			wantedAtt, ok := wantedAttsByRoot[signingRoot]
+			wantedAtt, ok := wantedAttsByRoot[att.SigningRoot]
 			require.Equal(t, true, ok)
 			require.DeepEqual(t, wantedAtt, att)
 		}
@@ -222,7 +218,7 @@ func TestImportInterchangeData_OK(t *testing.T) {
 		proposals := proposalHistory[i].Proposals
 		receivedProposalHistory, err := validatorDB.ProposalHistoryForPubKey(ctx, publicKeys[i])
 		require.NoError(t, err)
-		rootsBySlot := make(map[primitives.Slot][]byte)
+		rootsBySlot := make(map[types.Slot][]byte)
 		for _, proposal := range receivedProposalHistory {
 			rootsBySlot[proposal.Slot] = proposal.SigningRoot
 		}

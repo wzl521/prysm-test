@@ -2,10 +2,10 @@ package stateutil
 
 import (
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/math"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/math"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 )
 
 // UnrealizedCheckpointBalances returns the total current active balance, the
@@ -13,7 +13,7 @@ import (
 // current epoch correctly attested for target balance. It takes the current and
 // previous epoch participation bits as parameters so implicitly only works for
 // beacon states post-Altair.
-func UnrealizedCheckpointBalances(cp, pp []byte, validators []*ethpb.Validator, currentEpoch primitives.Epoch) (uint64, uint64, uint64, error) {
+func UnrealizedCheckpointBalances(cp, pp []byte, validators []*ethpb.Validator, currentEpoch types.Epoch) (uint64, uint64, uint64, error) {
 	targetIdx := params.BeaconConfig().TimelyTargetFlagIndex
 	activeBalance := uint64(0)
 	currentTarget := uint64(0)
@@ -24,44 +24,25 @@ func UnrealizedCheckpointBalances(cp, pp []byte, validators []*ethpb.Validator, 
 
 	var err error
 	for i, v := range validators {
-		activeCurrent := v.ActivationEpoch <= currentEpoch && currentEpoch < v.ExitEpoch
-		if activeCurrent {
+		active := v.ActivationEpoch <= currentEpoch && currentEpoch < v.ExitEpoch
+		if active && !v.Slashed {
 			activeBalance, err = math.Add64(activeBalance, v.EffectiveBalance)
 			if err != nil {
 				return 0, 0, 0, err
 			}
-		}
-		if v.Slashed {
-			continue
-		}
-		if activeCurrent && ((cp[i]>>targetIdx)&1) == 1 {
-			currentTarget, err = math.Add64(currentTarget, v.EffectiveBalance)
-			if err != nil {
-				return 0, 0, 0, err
+			if ((cp[i] >> targetIdx) & 1) == 1 {
+				currentTarget, err = math.Add64(currentTarget, v.EffectiveBalance)
+				if err != nil {
+					return 0, 0, 0, err
+				}
 			}
-		}
-		activePrevious := v.ActivationEpoch < currentEpoch && currentEpoch <= v.ExitEpoch
-		if activePrevious && ((pp[i]>>targetIdx)&1) == 1 {
-			prevTarget, err = math.Add64(prevTarget, v.EffectiveBalance)
-			if err != nil {
-				return 0, 0, 0, err
+			if ((pp[i] >> targetIdx) & 1) == 1 {
+				prevTarget, err = math.Add64(prevTarget, v.EffectiveBalance)
+				if err != nil {
+					return 0, 0, 0, err
+				}
 			}
 		}
 	}
-	activeBalance, prevTarget, currentTarget = ensureLowerBound(activeBalance, prevTarget, currentTarget)
 	return activeBalance, prevTarget, currentTarget, nil
-}
-
-func ensureLowerBound(activeCurrEpoch, prevTargetAttested, currTargetAttested uint64) (uint64, uint64, uint64) {
-	ebi := params.BeaconConfig().EffectiveBalanceIncrement
-	if ebi > activeCurrEpoch {
-		activeCurrEpoch = ebi
-	}
-	if ebi > prevTargetAttested {
-		prevTargetAttested = ebi
-	}
-	if ebi > currTargetAttested {
-		currTargetAttested = ebi
-	}
-	return activeCurrEpoch, prevTargetAttested, currTargetAttested
 }

@@ -3,22 +3,23 @@ package p2p
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"encoding/hex"
 	"net"
 	"time"
 
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	ecdsaprysm "github.com/prysmaticlabs/prysm/v5/crypto/ecdsa"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	ecdsaprysm "github.com/prysmaticlabs/prysm/v3/crypto/ecdsa"
+	"github.com/prysmaticlabs/prysm/v3/runtime/version"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 )
 
 // Listener defines the discovery V5 network interface that is used
@@ -42,12 +43,6 @@ func (s *Service) RefreshENR() {
 	if s.dv5Listener == nil || !s.isInitialized() {
 		return
 	}
-	currEpoch := slots.ToEpoch(slots.CurrentSlot(uint64(s.genesisTime.Unix())))
-	if err := initializePersistentSubnets(s.dv5Listener.LocalNode().ID(), currEpoch); err != nil {
-		log.WithError(err).Error("Could not initialize persistent subnets")
-		return
-	}
-
 	bitV := bitfield.NewBitvector64()
 	committees := cache.SubnetIDs.GetAllSubnets()
 	for _, idx := range committees {
@@ -58,8 +53,8 @@ func (s *Service) RefreshENR() {
 		log.WithError(err).Error("Could not retrieve att bitfield")
 		return
 	}
-
 	// Compare current epoch with our fork epochs
+	currEpoch := slots.ToEpoch(slots.CurrentSlot(uint64(s.genesisTime.Unix())))
 	altairForkEpoch := params.BeaconConfig().AltairForkEpoch
 	switch {
 	// Altair Behaviour
@@ -238,6 +233,8 @@ func (s *Service) createLocalNode(
 	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
 
+	log.Infof("genesisTime: %v, genesis validator root: %s", s.genesisTime.UnixNano(), hex.EncodeToString(s.genesisValidatorsRoot))
+
 	localNode, err = addForkEntry(localNode, s.genesisTime, s.genesisValidatorsRoot)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not add eth2 fork version entry to enr")
@@ -262,14 +259,14 @@ func (s *Service) startDiscoveryV5(
 // filterPeer validates each node that we retrieve from our dht. We
 // try to ascertain that the peer can be a valid protocol peer.
 // Validity Conditions:
-//  1. The local node is still actively looking for peers to
-//     connect to.
-//  2. Peer has a valid IP and TCP port set in their enr.
-//  3. Peer hasn't been marked as 'bad'
-//  4. Peer is not currently active or connected.
-//  5. Peer is ready to receive incoming connections.
-//  6. Peer's fork digest in their ENR matches that of
-//     our localnodes.
+// 1) The local node is still actively looking for peers to
+//    connect to.
+// 2) Peer has a valid IP and TCP port set in their enr.
+// 3) Peer hasn't been marked as 'bad'
+// 4) Peer is not currently active or connected.
+// 5) Peer is ready to receive incoming connections.
+// 6) Peer's fork digest in their ENR matches that of
+// 	  our localnodes.
 func (s *Service) filterPeer(node *enode.Node) bool {
 	// Ignore nil node entries passed in.
 	if node == nil {
@@ -338,7 +335,7 @@ func (s *Service) isPeerAtLimit(inbound bool) bool {
 	return activePeers >= maxPeers || numOfConns >= maxPeers
 }
 
-// PeersFromStringAddrs converts peer raw ENRs into multiaddrs for p2p.
+// PeersFromStringAddrs convers peer raw ENRs into multiaddrs for p2p.
 func PeersFromStringAddrs(addrs []string) ([]ma.Multiaddr, error) {
 	var allAddrs []ma.Multiaddr
 	enodeString, multiAddrString := parseGenericAddrs(addrs)
@@ -464,19 +461,6 @@ func convertToUdpMultiAddr(node *enode.Node) ([]ma.Multiaddr, error) {
 	}
 
 	return addresses, nil
-}
-
-func peerIdsFromMultiAddrs(addrs []ma.Multiaddr) []peer.ID {
-	var peers []peer.ID
-	for _, a := range addrs {
-		info, err := peer.AddrInfoFromP2pAddr(a)
-		if err != nil {
-			log.WithError(err).Errorf("Could not derive peer info from multiaddress %s", a.String())
-			continue
-		}
-		peers = append(peers, info.ID)
-	}
-	return peers
 }
 
 func multiAddrFromString(address string) (ma.Multiaddr, error) {

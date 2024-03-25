@@ -7,38 +7,35 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/go-bitfield"
-	mockChain "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/altair"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed"
-	opfeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/operation"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/transition"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
-	testingdb "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/testing"
-	doublylinkedtree "github.com/prysmaticlabs/prysm/v5/beacon-chain/forkchoice/doubly-linked-tree"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	mockp2p "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/testing"
-	p2ptypes "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/types"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stategen"
-	mockSync "github.com/prysmaticlabs/prysm/v5/beacon-chain/sync/initial-sync/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/verification"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	mockChain "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/altair"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	opfeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/operation"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/transition"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
+	testingdb "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/encoder"
+	mockp2p "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/testing"
+	p2ptypes "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/types"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stategen"
+	mockSync "github.com/prysmaticlabs/prysm/v3/beacon-chain/sync/initial-sync/testing"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 )
 
 func TestService_ValidateSyncContributionAndProof(t *testing.T) {
@@ -51,36 +48,38 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		Genesis:        time.Now(),
 		ValidatorsRoot: [32]byte{'A'},
 	}
-	var emptySig [96]byte
+	emptySig := [96]byte{}
 	type args struct {
+		ctx   context.Context
 		pid   peer.ID
 		msg   *ethpb.SignedContributionAndProof
 		topic string
 	}
 	tests := []struct {
 		name     string
-		svcopts  []Option
-		setupSvc func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock)
-		clock    *startup.Clock
+		svc      *Service
+		setupSvc func(s *Service, msg *ethpb.SignedContributionAndProof) *Service
 		args     args
 		want     pubsub.ValidationResult
 	}{
 		{
 			name: "Is syncing",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: true}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				s.cfg.beaconDB = database
 				s.initCaches()
-				return s, startup.NewClock(time.Now(), [32]byte{})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: "junk",
 				msg: &ethpb.SignedContributionAndProof{
@@ -101,20 +100,22 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Bad Topic",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				s.cfg.beaconDB = database
 				s.initCaches()
-				return s, startup.NewClock(time.Now(), [32]byte{})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: "junk",
 				msg: &ethpb.SignedContributionAndProof{
@@ -135,19 +136,21 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Future Slot Message",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				s.cfg.beaconDB = database
 				s.initCaches()
-				return s, startup.NewClock(time.Now(), [32]byte{})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -168,27 +171,29 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Already Seen Message",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				s.cfg.beaconDB = database
 				s.initCaches()
 				s.cfg.chain = &mockChain.ChainService{
-					Genesis: time.Now(),
+					ValidatorsRoot: [32]byte{'A'},
+					Genesis:        time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
 				}
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				msg.Message.Contribution.AggregationBits.SetBitAt(1, true)
 
 				s.setSyncContributionIndexSlotSeen(1, 1, 1)
-				gt := time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot))
-				return s, startup.NewClock(gt, [32]byte{'A'})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -209,27 +214,29 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Invalid Subcommittee Index",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				s.cfg.beaconDB = database
 				s.initCaches()
 				s.cfg.chain = &mockChain.ChainService{
-					Genesis: time.Now(),
+					ValidatorsRoot: [32]byte{'A'},
+					Genesis:        time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
 				}
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				msg.Message.Contribution.AggregationBits.SetBitAt(1, true)
 				msg.Message.Contribution.SubcommitteeIndex = 20
 
-				gt := time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot))
-				return s, startup.NewClock(gt, [32]byte{'A'})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -250,28 +257,30 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Invalid Selection Proof",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				s.cfg.beaconDB = database
 				s.initCaches()
 				s.cfg.chain = &mockChain.ChainService{
-					Genesis: time.Now(),
+					ValidatorsRoot: [32]byte{'A'},
+					Genesis:        time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
 				}
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				incorrectProof := [96]byte{0xBB}
 				msg.Message.SelectionProof = incorrectProof[:]
 				msg.Message.Contribution.AggregationBits.SetBitAt(1, true)
 
-				gt := time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot))
-				return s, startup.NewClock(gt, [32]byte{'A'})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -292,18 +301,20 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Invalid Aggregator",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				s.cfg.beaconDB = database
 				s.initCaches()
 				s.cfg.chain = &mockChain.ChainService{
-					Genesis: time.Now(),
+					ValidatorsRoot: [32]byte{'A'},
+					Genesis:        time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
 				}
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				hState, err := database.State(context.Background(), headRoot)
@@ -311,12 +322,12 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				sc, err := hState.CurrentSyncCommittee()
 				assert.NoError(t, err)
 				for i := uint64(0); i < params.BeaconConfig().SyncCommitteeSubnetCount; i++ {
-					coms, err := altair.SyncSubCommitteePubkeys(sc, primitives.CommitteeIndex(i))
+					coms, err := altair.SyncSubCommitteePubkeys(sc, types.CommitteeIndex(i))
 					assert.NoError(t, err)
 					for _, p := range coms {
 						idx, ok := hState.ValidatorIndexByPubkey(bytesutil.ToBytes48(p))
 						assert.Equal(t, true, ok)
-						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), primitives.CommitteeIndex(i))
+						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), types.CommitteeIndex(i))
 						assert.NoError(t, err)
 						sig := keys[idx].Sign(rt[:])
 						isAggregator, err := altair.IsSyncCommitteeAggregator(sig.Marshal())
@@ -328,10 +339,10 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 					}
 				}
 				msg.Message.Contribution.AggregationBits.SetBitAt(1, true)
-				gt := time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot))
-				return s, startup.NewClock(gt, [32]byte{'A'})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -352,14 +363,15 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Failed Selection Proof Verification ",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				s.cfg.beaconDB = database
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				hState, err := database.State(context.Background(), headRoot)
@@ -367,12 +379,12 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				sc, err := hState.CurrentSyncCommittee()
 				assert.NoError(t, err)
 				for i := uint64(0); i < params.BeaconConfig().SyncCommitteeSubnetCount; i++ {
-					coms, err := altair.SyncSubCommitteePubkeys(sc, primitives.CommitteeIndex(i))
+					coms, err := altair.SyncSubCommitteePubkeys(sc, types.CommitteeIndex(i))
 					assert.NoError(t, err)
 					for _, p := range coms {
 						idx, ok := hState.ValidatorIndexByPubkey(bytesutil.ToBytes48(p))
 						assert.Equal(t, true, ok)
-						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), primitives.CommitteeIndex(i))
+						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), types.CommitteeIndex(i))
 						assert.NoError(t, err)
 						sig := keys[idx].Sign(rt[:])
 						isAggregator, err := altair.IsSyncCommitteeAggregator(sig.Marshal())
@@ -385,16 +397,17 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				}
 				subCommitteeSize := params.BeaconConfig().SyncCommitteeSize / params.BeaconConfig().SyncCommitteeSubnetCount
 				s.cfg.chain = &mockChain.ChainService{
-					Genesis:              time.Now(),
-					SyncCommitteeIndices: []primitives.CommitteeIndex{primitives.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
+					ValidatorsRoot:       [32]byte{'A'},
+					Genesis:              time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
+					SyncCommitteeIndices: []types.CommitteeIndex{types.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
 				}
 				msg.Message.Contribution.AggregationBits.SetBitAt(1, true)
 
 				s.initCaches()
-				gt := time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot))
-				return s, startup.NewClock(gt, [32]byte{'A'})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -415,14 +428,15 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Invalid Proof Signature",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				s.cfg.beaconDB = database
 				s.cfg.chain = chainService
 				msg.Message.Contribution.BlockRoot = headRoot[:]
@@ -432,12 +446,12 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				assert.NoError(t, err)
 				var pubkey []byte
 				for i := uint64(0); i < params.BeaconConfig().SyncCommitteeSubnetCount; i++ {
-					coms, err := altair.SyncSubCommitteePubkeys(sc, primitives.CommitteeIndex(i))
+					coms, err := altair.SyncSubCommitteePubkeys(sc, types.CommitteeIndex(i))
 					assert.NoError(t, err)
 					for _, p := range coms {
 						idx, ok := hState.ValidatorIndexByPubkey(bytesutil.ToBytes48(p))
 						assert.Equal(t, true, ok)
-						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), primitives.CommitteeIndex(i))
+						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), types.CommitteeIndex(i))
 						assert.NoError(t, err)
 						sig := keys[idx].Sign(rt[:])
 						isAggregator, err := altair.IsSyncCommitteeAggregator(sig.Marshal())
@@ -462,17 +476,18 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				require.NoError(t, err)
 				subCommitteeSize := params.BeaconConfig().SyncCommitteeSize / params.BeaconConfig().SyncCommitteeSubnetCount
 				s.cfg.chain = &mockChain.ChainService{
-					SyncCommitteeIndices:     []primitives.CommitteeIndex{primitives.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
+					ValidatorsRoot:           [32]byte{'A'},
+					Genesis:                  time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
+					SyncCommitteeIndices:     []types.CommitteeIndex{types.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
 					PublicKey:                bytesutil.ToBytes48(pubkey),
 					SyncSelectionProofDomain: d,
-					Genesis:                  time.Now(),
 				}
 
 				s.initCaches()
-				gt := time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot))
-				return s, startup.NewClock(gt, [32]byte{'A'})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -493,14 +508,15 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Invalid Sync Aggregate",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				s.cfg.beaconDB = database
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				hState, err := database.State(context.Background(), headRoot)
@@ -508,12 +524,12 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				sc, err := hState.CurrentSyncCommittee()
 				assert.NoError(t, err)
 				for i := uint64(0); i < params.BeaconConfig().SyncCommitteeSubnetCount; i++ {
-					coms, err := altair.SyncSubCommitteePubkeys(sc, primitives.CommitteeIndex(i))
+					coms, err := altair.SyncSubCommitteePubkeys(sc, types.CommitteeIndex(i))
 					assert.NoError(t, err)
 					for _, p := range coms {
 						idx, ok := hState.ValidatorIndexByPubkey(bytesutil.ToBytes48(p))
 						assert.Equal(t, true, ok)
-						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), primitives.CommitteeIndex(i))
+						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), types.CommitteeIndex(i))
 						assert.NoError(t, err)
 						sig := keys[idx].Sign(rt[:])
 						isAggregator, err := altair.IsSyncCommitteeAggregator(sig.Marshal())
@@ -544,15 +560,16 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 					}
 				}
 				s.cfg.chain = &mockChain.ChainService{
-					SyncCommitteeIndices: []primitives.CommitteeIndex{1},
-					Genesis:              time.Now(),
+					ValidatorsRoot:       [32]byte{'A'},
+					Genesis:              time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
+					SyncCommitteeIndices: []types.CommitteeIndex{1},
 				}
 
 				s.initCaches()
-				gt := time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot))
-				return s, startup.NewClock(gt, [32]byte{'A'})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -573,14 +590,15 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Invalid Signed Sync Contribution And Proof - Zero Bits Set",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				s.cfg.beaconDB = database
 				hState, err := database.State(context.Background(), headRoot)
@@ -590,12 +608,12 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				cd, err := signing.Domain(hState.Fork(), slots.ToEpoch(slots.PrevSlot(hState.Slot())), params.BeaconConfig().DomainContributionAndProof, hState.GenesisValidatorsRoot())
 				assert.NoError(t, err)
 				for i := uint64(0); i < params.BeaconConfig().SyncCommitteeSubnetCount; i++ {
-					coms, err := altair.SyncSubCommitteePubkeys(sc, primitives.CommitteeIndex(i))
+					coms, err := altair.SyncSubCommitteePubkeys(sc, types.CommitteeIndex(i))
 					assert.NoError(t, err)
 					for _, p := range coms {
 						idx, ok := hState.ValidatorIndexByPubkey(bytesutil.ToBytes48(p))
 						assert.Equal(t, true, ok)
-						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), primitives.CommitteeIndex(i))
+						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), types.CommitteeIndex(i))
 						assert.NoError(t, err)
 						sig := keys[idx].Sign(rt[:])
 						isAggregator, err := altair.IsSyncCommitteeAggregator(sig.Marshal())
@@ -623,18 +641,19 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				require.NoError(t, err)
 				subCommitteeSize := params.BeaconConfig().SyncCommitteeSize / params.BeaconConfig().SyncCommitteeSubnetCount
 				s.cfg.chain = &mockChain.ChainService{
-					SyncCommitteeIndices:        []primitives.CommitteeIndex{primitives.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
+					ValidatorsRoot:              [32]byte{'A'},
+					Genesis:                     time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
+					SyncCommitteeIndices:        []types.CommitteeIndex{types.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
 					PublicKey:                   bytesutil.ToBytes48(keys[msg.Message.AggregatorIndex].PublicKey().Marshal()),
 					SyncSelectionProofDomain:    d,
 					SyncContributionProofDomain: cd,
 					SyncCommitteeDomain:         make([]byte, 32),
-					Genesis:                     time.Now(),
 				}
 				s.initCaches()
-				gt := time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot))
-				return s, startup.NewClock(gt, [32]byte{'A'})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -655,14 +674,15 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Valid Signed Sync Contribution And Proof - Single Bit Set",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				s.cfg.beaconDB = database
 				hState, err := database.State(context.Background(), headRoot)
@@ -675,13 +695,13 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				assert.NoError(t, err)
 				var pubkeys [][]byte
 				for i := uint64(0); i < params.BeaconConfig().SyncCommitteeSubnetCount; i++ {
-					coms, err := altair.SyncSubCommitteePubkeys(sc, primitives.CommitteeIndex(i))
+					coms, err := altair.SyncSubCommitteePubkeys(sc, types.CommitteeIndex(i))
 					pubkeys = coms
 					assert.NoError(t, err)
 					for _, p := range coms {
 						idx, ok := hState.ValidatorIndexByPubkey(bytesutil.ToBytes48(p))
 						assert.Equal(t, true, ok)
-						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), primitives.CommitteeIndex(i))
+						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), types.CommitteeIndex(i))
 						assert.NoError(t, err)
 						sig := keys[idx].Sign(rt[:])
 						isAggregator, err := altair.IsSyncCommitteeAggregator(sig.Marshal())
@@ -716,19 +736,20 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				require.NoError(t, err)
 				subCommitteeSize := params.BeaconConfig().SyncCommitteeSize / params.BeaconConfig().SyncCommitteeSubnetCount
 				s.cfg.chain = &mockChain.ChainService{
-					SyncCommitteeIndices:        []primitives.CommitteeIndex{primitives.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
+					ValidatorsRoot:              [32]byte{'A'},
+					Genesis:                     time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
+					SyncCommitteeIndices:        []types.CommitteeIndex{types.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
 					PublicKey:                   bytesutil.ToBytes48(keys[msg.Message.AggregatorIndex].PublicKey().Marshal()),
 					SyncSelectionProofDomain:    pd,
 					SyncContributionProofDomain: cd,
 					SyncCommitteeDomain:         d,
 					SyncCommitteePubkeys:        pubkeys,
-					Genesis:                     time.Now(),
 				}
 				s.initCaches()
-				gt := time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot))
-				return s, startup.NewClock(gt, [32]byte{'A'})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -749,14 +770,15 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 		},
 		{
 			name: "Valid Signed Sync Contribution And Proof with Multiple Signatures",
-			svcopts: []Option{
+			svc: NewService(context.Background(),
 				WithP2P(mockp2p.NewTestP2P(t)),
 				WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 				WithChainService(chainService),
+				WithStateNotifier(chainService.StateNotifier()),
 				WithOperationNotifier(chainService.OperationNotifier()),
-			},
-			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) (*Service, *startup.Clock) {
-				s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+			),
+			setupSvc: func(s *Service, msg *ethpb.SignedContributionAndProof) *Service {
+				s.cfg.stateGen = stategen.New(database)
 				msg.Message.Contribution.BlockRoot = headRoot[:]
 				s.cfg.beaconDB = database
 				hState, err := database.State(context.Background(), headRoot)
@@ -769,13 +791,13 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				assert.NoError(t, err)
 				var pubkeys [][]byte
 				for i := uint64(0); i < params.BeaconConfig().SyncCommitteeSubnetCount; i++ {
-					coms, err := altair.SyncSubCommitteePubkeys(sc, primitives.CommitteeIndex(i))
+					coms, err := altair.SyncSubCommitteePubkeys(sc, types.CommitteeIndex(i))
 					pubkeys = coms
 					assert.NoError(t, err)
 					for _, p := range coms {
 						idx, ok := hState.ValidatorIndexByPubkey(bytesutil.ToBytes48(p))
 						assert.Equal(t, true, ok)
-						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), primitives.CommitteeIndex(i))
+						rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), types.CommitteeIndex(i))
 						assert.NoError(t, err)
 						sig := keys[idx].Sign(rt[:])
 						isAggregator, err := altair.IsSyncCommitteeAggregator(sig.Marshal())
@@ -812,20 +834,21 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				require.NoError(t, err)
 				subCommitteeSize := params.BeaconConfig().SyncCommitteeSize / params.BeaconConfig().SyncCommitteeSubnetCount
 				s.cfg.chain = &mockChain.ChainService{
-					SyncCommitteeIndices:        []primitives.CommitteeIndex{primitives.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
+					ValidatorsRoot:              [32]byte{'A'},
+					Genesis:                     time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
+					SyncCommitteeIndices:        []types.CommitteeIndex{types.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
 					PublicKey:                   bytesutil.ToBytes48(keys[msg.Message.AggregatorIndex].PublicKey().Marshal()),
 					SyncSelectionProofDomain:    pd,
 					SyncContributionProofDomain: cd,
 					SyncCommitteeDomain:         d,
 					SyncCommitteePubkeys:        pubkeys,
-					Genesis:                     time.Now(),
 				}
-				gt := time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot))
 
 				s.initCaches()
-				return s, startup.NewClock(gt, [32]byte{'A'})
+				return s
 			},
 			args: args{
+				ctx:   context.Background(),
 				pid:   "random",
 				topic: defaultTopic,
 				msg: &ethpb.SignedContributionAndProof{
@@ -847,17 +870,7 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			ctx, cancel := context.WithCancel(ctx)
-			defer cancel()
-			cw := startup.NewClockSynchronizer()
-			svc := NewService(ctx, append([]Option{WithClockWaiter(cw), WithStateNotifier(chainService.StateNotifier())}, tt.svcopts...)...)
-			var clock *startup.Clock
-			svc, clock = tt.setupSvc(svc, tt.args.msg)
-			require.NoError(t, cw.SetClock(clock))
-			svc.verifierWaiter = verification.NewInitializerWaiter(cw, chainService.ForkChoiceStore, svc.cfg.stateGen)
-
-			go svc.Start()
+			tt.svc = tt.setupSvc(tt.svc, tt.args.msg)
 			marshalledObj, err := tt.args.msg.MarshalSSZ()
 			assert.NoError(t, err)
 			marshalledObj = snappy.Encode(nil, marshalledObj)
@@ -869,16 +882,7 @@ func TestService_ValidateSyncContributionAndProof(t *testing.T) {
 				ReceivedFrom:  "",
 				ValidatorData: nil,
 			}
-			// a lot happens in the chain service after SetClock is called,
-			// give it a moment before calling internal methods that would typically
-			// only execute after waitFor
-			for i := 0; i < 10; i++ {
-				if !svc.chainIsStarted() {
-					time.Sleep(100 * time.Millisecond)
-				}
-			}
-			require.Equal(t, true, svc.chainIsStarted())
-			if got, err := svc.validateSyncContributionAndProof(ctx, tt.args.pid, msg); got != tt.want {
+			if got, err := tt.svc.validateSyncContributionAndProof(tt.args.ctx, tt.args.pid, msg); got != tt.want {
 				_ = err
 				t.Errorf("validateSyncContributionAndProof() = %v, want %v", got, tt.want)
 			}
@@ -893,7 +897,7 @@ func TestValidateSyncContributionAndProof(t *testing.T) {
 	defaultTopic := p2p.SyncContributionAndProofSubnetTopicFormat
 	defaultTopic = fmt.Sprintf(defaultTopic, []byte{0xAB, 0x00, 0xCC, 0x9E})
 	defaultTopic = defaultTopic + "/" + encoder.ProtocolSuffixSSZSnappy
-	var emptySig [96]byte
+	emptySig := [96]byte{}
 	pid := peer.ID("random")
 	msg := &ethpb.SignedContributionAndProof{
 		Message: &ethpb.ContributionAndProof{
@@ -917,11 +921,11 @@ func TestValidateSyncContributionAndProof(t *testing.T) {
 		WithP2P(mockp2p.NewTestP2P(t)),
 		WithInitialSync(&mockSync.Sync{IsSyncing: false}),
 		WithChainService(chainService),
+		WithStateNotifier(chainService.StateNotifier()),
 		WithOperationNotifier(chainService.OperationNotifier()),
 	)
-	s.cfg.clock = startup.NewClock(chainService.Genesis, chainService.ValidatorsRoot)
 	go s.verifierRoutine()
-	s.cfg.stateGen = stategen.New(database, doublylinkedtree.New())
+	s.cfg.stateGen = stategen.New(database)
 	msg.Message.Contribution.BlockRoot = headRoot[:]
 	s.cfg.beaconDB = database
 	hState, err := database.State(context.Background(), headRoot)
@@ -934,13 +938,13 @@ func TestValidateSyncContributionAndProof(t *testing.T) {
 	assert.NoError(t, err)
 	var pubkeys [][]byte
 	for i := uint64(0); i < params.BeaconConfig().SyncCommitteeSubnetCount; i++ {
-		coms, err := altair.SyncSubCommitteePubkeys(sc, primitives.CommitteeIndex(i))
+		coms, err := altair.SyncSubCommitteePubkeys(sc, types.CommitteeIndex(i))
 		pubkeys = coms
 		assert.NoError(t, err)
 		for _, p := range coms {
 			idx, ok := hState.ValidatorIndexByPubkey(bytesutil.ToBytes48(p))
 			assert.Equal(t, true, ok)
-			rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), primitives.CommitteeIndex(i))
+			rt, err := syncSelectionProofSigningRoot(hState, slots.PrevSlot(hState.Slot()), types.CommitteeIndex(i))
 			assert.NoError(t, err)
 			sig := keys[idx].Sign(rt[:])
 			isAggregator, err := altair.IsSyncCommitteeAggregator(sig.Marshal())
@@ -977,14 +981,13 @@ func TestValidateSyncContributionAndProof(t *testing.T) {
 	s.cfg.chain = &mockChain.ChainService{
 		ValidatorsRoot:              [32]byte{'A'},
 		Genesis:                     time.Now().Add(-time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Duration(msg.Message.Contribution.Slot)),
-		SyncCommitteeIndices:        []primitives.CommitteeIndex{primitives.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
+		SyncCommitteeIndices:        []types.CommitteeIndex{types.CommitteeIndex(msg.Message.Contribution.SubcommitteeIndex * subCommitteeSize)},
 		PublicKey:                   bytesutil.ToBytes48(keys[msg.Message.AggregatorIndex].PublicKey().Marshal()),
 		SyncSelectionProofDomain:    pd,
 		SyncContributionProofDomain: cd,
 		SyncCommitteeDomain:         d,
 		SyncCommitteePubkeys:        pubkeys,
 	}
-	s.cfg.clock = startup.NewClock(s.cfg.chain.GenesisTime(), s.cfg.chain.GenesisValidatorsRoot())
 	s.initCaches()
 
 	marshalledObj, err := msg.MarshalSSZ()
@@ -1032,8 +1035,8 @@ func fillUpBlocksAndState(ctx context.Context, t *testing.T, beaconDB db.Databas
 	assert.NoError(t, beaconDB.SaveGenesisData(context.Background(), gs))
 
 	testState := gs.Copy()
-	var hRoot [32]byte
-	for i := primitives.Slot(1); i <= params.BeaconConfig().SlotsPerEpoch; i++ {
+	hRoot := [32]byte{}
+	for i := types.Slot(1); i <= params.BeaconConfig().SlotsPerEpoch; i++ {
 		blk, err := util.GenerateFullBlockAltair(testState, keys, util.DefaultBlockGenConfig(), i)
 		require.NoError(t, err)
 		r, err := blk.Block.HashTreeRoot()
@@ -1051,7 +1054,7 @@ func fillUpBlocksAndState(ctx context.Context, t *testing.T, beaconDB db.Databas
 	return hRoot, keys
 }
 
-func syncSelectionProofSigningRoot(st state.BeaconState, slot primitives.Slot, comIdx primitives.CommitteeIndex) ([32]byte, error) {
+func syncSelectionProofSigningRoot(st state.BeaconState, slot types.Slot, comIdx types.CommitteeIndex) ([32]byte, error) {
 	dom, err := signing.Domain(st.Fork(), slots.ToEpoch(slot), params.BeaconConfig().DomainSyncCommitteeSelectionProof, st.GenesisValidatorsRoot())
 	if err != nil {
 		return [32]byte{}, err
@@ -1061,7 +1064,11 @@ func syncSelectionProofSigningRoot(st state.BeaconState, slot primitives.Slot, c
 }
 
 func TestService_setSyncContributionIndexSlotSeen(t *testing.T) {
-	s := NewService(context.Background(), WithP2P(mockp2p.NewTestP2P(t)))
+	chainService := &mockChain.ChainService{
+		Genesis:        time.Now(),
+		ValidatorsRoot: [32]byte{'A'},
+	}
+	s := NewService(context.Background(), WithP2P(mockp2p.NewTestP2P(t)), WithStateNotifier(chainService.StateNotifier()))
 	s.initCaches()
 
 	// Empty cache

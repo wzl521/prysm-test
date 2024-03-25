@@ -1,11 +1,11 @@
-package primitives_test
+package types_test
 
 import (
 	"encoding/hex"
 	"reflect"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
 )
 
 func TestSSZBytes_HashTreeRoot(t *testing.T) {
@@ -36,7 +36,7 @@ func TestSSZBytes_HashTreeRoot(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := primitives.SSZBytes(tt.actualValue)
+			s := types.SSZBytes(tt.actualValue)
 			htr, err := s.HashTreeRoot()
 			if err != nil {
 				t.Errorf("SSZBytes.HashTreeRoot() unexpected error = %v", err)

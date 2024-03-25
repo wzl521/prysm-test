@@ -13,26 +13,24 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	gethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache/depositsnapshot"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed"
-	statefeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/state"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
-	coreState "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/transition"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/execution/types"
-	statenative "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/container/trie"
-	contracts "github.com/prysmaticlabs/prysm/v5/contracts/deposit"
-	"github.com/prysmaticlabs/prysm/v5/crypto/hash"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
+	statefeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/state"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
+	coreState "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/transition"
+	statenative "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/state-native"
+	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
+	"github.com/prysmaticlabs/prysm/v3/config/features"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	contracts "github.com/prysmaticlabs/prysm/v3/contracts/deposit"
+	"github.com/prysmaticlabs/prysm/v3/crypto/hash"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	"github.com/sirupsen/logrus"
 )
 
 var (
-	depositEventSignature = hash.Keccak256([]byte("DepositEvent(bytes,bytes,bytes,bytes,bytes)"))
+	depositEventSignature = hash.HashKeccak256([]byte("DepositEvent(bytes,bytes,bytes,bytes,bytes)"))
 )
 
 const eth1DataSavingInterval = 1000
@@ -41,7 +39,6 @@ const defaultEth1HeaderReqLimit = uint64(1000)
 const depositLogRequestLimit = 10000
 const additiveFactorMultiplier = 0.10
 const multiplicativeDecreaseDivisor = 2
-const depositLoggingInterval = 1024
 
 var errTimedOut = errors.New("net/http: request canceled")
 
@@ -54,7 +51,7 @@ func clientTimedOutError(err error) bool {
 	return strings.Contains(err.Error(), errTimedOut.Error())
 }
 
-// GenesisExecutionChainInfo retrieves the genesis time and execution block number of the beacon chain
+// Eth2GenesisPowchainInfo retrieves the genesis time and eth1 block number of the beacon chain
 // from the deposit contract.
 func (s *Service) GenesisExecutionChainInfo() (uint64, *big.Int) {
 	return s.chainStartData.GenesisTime, big.NewInt(int64(s.chainStartData.GenesisBlock))
@@ -73,12 +70,12 @@ func (s *Service) ProcessETH1Block(ctx context.Context, blkNum *big.Int) error {
 	if err != nil {
 		return err
 	}
-	for i, filterLog := range logs {
+	for _, filterLog := range logs {
 		// ignore logs that are not of the required block number
 		if filterLog.BlockNumber != blkNum.Uint64() {
 			continue
 		}
-		if err := s.ProcessLog(ctx, &logs[i]); err != nil {
+		if err := s.ProcessLog(ctx, filterLog); err != nil {
 			return errors.Wrap(err, "could not process log")
 		}
 	}
@@ -92,7 +89,7 @@ func (s *Service) ProcessETH1Block(ctx context.Context, blkNum *big.Int) error {
 
 // ProcessLog is the main method which handles the processing of all
 // logs from the deposit contract on the eth1 chain.
-func (s *Service) ProcessLog(ctx context.Context, depositLog *gethtypes.Log) error {
+func (s *Service) ProcessLog(ctx context.Context, depositLog gethtypes.Log) error {
 	s.processingLock.RLock()
 	defer s.processingLock.RUnlock()
 	// Process logs according to their event signature.
@@ -112,7 +109,7 @@ func (s *Service) ProcessLog(ctx context.Context, depositLog *gethtypes.Log) err
 // ProcessDepositLog processes the log which had been received from
 // the eth1 chain by trying to ascertain which participant deposited
 // in the contract.
-func (s *Service) ProcessDepositLog(ctx context.Context, depositLog *gethtypes.Log) error {
+func (s *Service) ProcessDepositLog(ctx context.Context, depositLog gethtypes.Log) error {
 	pubkey, withdrawalCredentials, amount, signature, merkleTreeIndex, err := contracts.UnpackDepositLogData(depositLog.Data)
 	if err != nil {
 		return errors.Wrap(err, "Could not unpack log")
@@ -145,6 +142,7 @@ func (s *Service) ProcessDepositLog(ctx context.Context, depositLog *gethtypes.L
 	if err != nil {
 		return errors.Wrap(err, "unable to determine hashed value of deposit")
 	}
+
 	// Defensive check to validate incoming index.
 	if s.depositTrie.NumOfItems() != int(index) {
 		return errors.Errorf("invalid deposit index received: wanted %d but got %d", s.depositTrie.NumOfItems(), index)
@@ -152,6 +150,7 @@ func (s *Service) ProcessDepositLog(ctx context.Context, depositLog *gethtypes.L
 	if err = s.depositTrie.Insert(depositHash[:], int(index)); err != nil {
 		return err
 	}
+
 	deposit := &ethpb.Deposit{
 		Data: depositData,
 	}
@@ -196,19 +195,16 @@ func (s *Service) ProcessDepositLog(ctx context.Context, depositLog *gethtypes.L
 		s.cfg.depositCache.InsertPendingDeposit(ctx, deposit, depositLog.BlockNumber, index, root)
 	}
 	if validData {
-		// Log the deposit received periodically
-		if index%depositLoggingInterval == 0 {
-			log.WithFields(logrus.Fields{
-				"eth1Block":       depositLog.BlockNumber,
-				"publicKey":       fmt.Sprintf("%#x", depositData.PublicKey),
-				"merkleTreeIndex": index,
-			}).Debug("Deposit registered from deposit contract")
-		}
+		log.WithFields(logrus.Fields{
+			"eth1Block":       depositLog.BlockNumber,
+			"publicKey":       fmt.Sprintf("%#x", depositData.PublicKey),
+			"merkleTreeIndex": index,
+		}).Debug("Deposit registered from deposit contract")
 		validDepositsCount.Inc()
 		// Notify users what is going on, from time to time.
 		if !s.chainStartData.Chainstarted {
 			deposits := len(s.chainStartData.ChainstartDeposits)
-			if deposits%depositLoggingInterval == 0 {
+			if deposits%512 == 0 {
 				valCount, err := helpers.ActiveValidatorCount(ctx, s.preGenesisState, 0)
 				if err != nil {
 					log.WithError(err).Error("Could not determine active validator count from pre genesis state")
@@ -226,18 +222,6 @@ func (s *Service) ProcessDepositLog(ctx context.Context, depositLog *gethtypes.L
 			"merkleTreeIndex": index,
 		}).Info("Invalid deposit registered in deposit contract")
 	}
-	if features.Get().EnableEIP4881 {
-		// We finalize the trie here so that old deposits are not kept around, as they make
-		// deposit tree htr computation expensive.
-		dTrie, ok := s.depositTrie.(*depositsnapshot.DepositTree)
-		if !ok {
-			return errors.Errorf("wrong trie type initialized: %T", dTrie)
-		}
-		if err := dTrie.Finalize(index, depositLog.BlockHash, depositLog.BlockNumber); err != nil {
-			log.WithError(err).Error("Could not finalize trie")
-		}
-	}
-
 	return nil
 }
 
@@ -247,7 +231,7 @@ func (s *Service) ProcessChainStart(genesisTime uint64, eth1BlockHash [32]byte, 
 	s.chainStartData.Chainstarted = true
 	s.chainStartData.GenesisBlock = blockNumber.Uint64()
 
-	chainStartTime := time.Unix(int64(genesisTime), 0) // lint:ignore uintcast -- Genesis time won't exceed int64 in your lifetime.
+	chainStartTime := time.Unix(int64(genesisTime), 0) // lint:ignore uintcast -- Genesis time wont exceed int64 in your lifetime.
 
 	for i := range s.chainStartData.ChainstartDeposits {
 		proof, err := s.depositTrie.MerkleProof(i)
@@ -302,7 +286,7 @@ func (s *Service) processPastLogs(ctx context.Context) error {
 		currentBlockNum = deploymentBlock
 	}
 	// To store all blocks.
-	headersMap := make(map[uint64]*types.HeaderInfo)
+	headersMap := make(map[uint64]*gethtypes.Header)
 	rawLogCount, err := s.depositContractCaller.GetDepositCount(&bind.CallOpts{})
 	if err != nil {
 		return err
@@ -316,11 +300,6 @@ func (s *Service) processPastLogs(ctx context.Context) error {
 
 	batchSize := s.cfg.eth1HeaderReqLimit
 	additiveFactor := uint64(float64(batchSize) * additiveFactorMultiplier)
-
-	log.WithFields(logrus.Fields{
-		"currentEth1Block": latestFollowHeight,
-		"currentLogCount":  logCount,
-	}).Debug("Processing historical deposit logs")
 
 	for currentBlockNum < latestFollowHeight {
 		currentBlockNum, batchSize, err = s.processBlockInBatch(ctx, currentBlockNum, latestFollowHeight, batchSize, additiveFactor, logCount, headersMap)
@@ -359,12 +338,12 @@ func (s *Service) processPastLogs(ctx context.Context) error {
 		}
 	}
 	if fState != nil && !fState.IsNil() && fState.Eth1DepositIndex() > 0 {
-		s.cfg.depositCache.PrunePendingDeposits(ctx, int64(fState.Eth1DepositIndex())) // lint:ignore uintcast -- deposit index should not exceed int64 in your lifetime.
+		s.cfg.depositCache.PrunePendingDeposits(ctx, int64(fState.Eth1DepositIndex())) // lint:ignore uintcast -- Deposit index should not exceed int64 in your lifetime.
 	}
 	return nil
 }
 
-func (s *Service) processBlockInBatch(ctx context.Context, currentBlockNum uint64, latestFollowHeight uint64, batchSize uint64, additiveFactor uint64, logCount uint64, headersMap map[uint64]*types.HeaderInfo) (uint64, uint64, error) {
+func (s *Service) processBlockInBatch(ctx context.Context, currentBlockNum uint64, latestFollowHeight uint64, batchSize uint64, additiveFactor uint64, logCount uint64, headersMap map[uint64]*gethtypes.Header) (uint64, uint64, error) {
 	// Batch request the desired headers and store them in a
 	// map for quick access.
 	requestHeaders := func(startBlk uint64, endBlk uint64) error {
@@ -428,7 +407,7 @@ func (s *Service) processBlockInBatch(ctx context.Context, currentBlockNum uint6
 	lastReqBlock := s.latestEth1Data.LastRequestedBlock
 	s.latestEth1DataLock.RUnlock()
 
-	for i, filterLog := range logs {
+	for _, filterLog := range logs {
 		if filterLog.BlockNumber > currentBlockNum {
 			if err := s.checkHeaderRange(ctx, currentBlockNum, filterLog.BlockNumber-1, headersMap, requestHeaders); err != nil {
 				return 0, 0, err
@@ -439,7 +418,7 @@ func (s *Service) processBlockInBatch(ctx context.Context, currentBlockNum uint6
 			s.latestEth1DataLock.Unlock()
 			currentBlockNum = filterLog.BlockNumber
 		}
-		if err := s.ProcessLog(ctx, &logs[i]); err != nil {
+		if err := s.ProcessLog(ctx, filterLog); err != nil {
 			// In the event the execution client gives us a garbled/bad log
 			// we reset the last requested block to the previous valid block range. This
 			// prevents the beacon from advancing processing of logs to another range
@@ -522,11 +501,11 @@ func (s *Service) processChainStartFromBlockNum(ctx context.Context, blkNum *big
 	return nil
 }
 
-func (s *Service) processChainStartFromHeader(ctx context.Context, header *types.HeaderInfo) {
-	s.processChainStartIfReady(ctx, header.Hash, header.Number, header.Time)
+func (s *Service) processChainStartFromHeader(ctx context.Context, header *gethtypes.Header) {
+	s.processChainStartIfReady(ctx, header.Hash(), header.Number, header.Time)
 }
 
-func (s *Service) checkHeaderRange(ctx context.Context, start, end uint64, headersMap map[uint64]*types.HeaderInfo,
+func (s *Service) checkHeaderRange(ctx context.Context, start, end uint64, headersMap map[uint64]*gethtypes.Header,
 	requestHeaders func(uint64, uint64) error) error {
 	for i := start; i <= end; i++ {
 		if !s.chainStartData.Chainstarted {
@@ -573,7 +552,13 @@ func (s *Service) processChainStartIfReady(ctx context.Context, blockHash [32]by
 
 // savePowchainData saves all powchain related metadata to disk.
 func (s *Service) savePowchainData(ctx context.Context) error {
-	pbState, err := statenative.ProtobufBeaconStatePhase0(s.preGenesisState.ToProtoUnsafe())
+	var pbState *ethpb.BeaconState
+	var err error
+	if features.Get().EnableNativeState {
+		pbState, err = statenative.ProtobufBeaconStatePhase0(s.preGenesisState.InnerStateUnsafe())
+	} else {
+		pbState, err = v1.ProtobufBeaconState(s.preGenesisState.InnerStateUnsafe())
+	}
 	if err != nil {
 		return err
 	}
@@ -581,27 +566,8 @@ func (s *Service) savePowchainData(ctx context.Context) error {
 		CurrentEth1Data:   s.latestEth1Data,
 		ChainstartData:    s.chainStartData,
 		BeaconState:       pbState, // I promise not to mutate it!
+		Trie:              s.depositTrie.ToProto(),
 		DepositContainers: s.cfg.depositCache.AllDepositContainers(ctx),
-	}
-	if features.Get().EnableEIP4881 {
-		fd, err := s.cfg.depositCache.FinalizedDeposits(ctx)
-		if err != nil {
-			return errors.Errorf("could not get finalized deposit tree: %v", err)
-		}
-		tree, ok := fd.Deposits().(*depositsnapshot.DepositTree)
-		if !ok {
-			return errors.New("deposit tree was not EIP4881 DepositTree")
-		}
-		eth1Data.DepositSnapshot, err = tree.ToProto()
-		if err != nil {
-			return err
-		}
-	} else {
-		tree, ok := s.depositTrie.(*trie.SparseMerkleTrie)
-		if !ok {
-			return errors.New("deposit tree was not SparseMerkleTrie")
-		}
-		eth1Data.Trie = tree.ToProto()
 	}
 	return s.cfg.beaconDB.SaveExecutionChainData(ctx, eth1Data)
 }

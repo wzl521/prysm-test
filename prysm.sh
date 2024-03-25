@@ -75,11 +75,14 @@ fi
 
 readonly wrapper_dir="$(dirname "$(get_realpath "${BASH_SOURCE[0]}")")/dist"
 
-
-arch=$(uname -m)
-arch=${arch/x86_64/amd64}
-arch=${arch/aarch64/arm64}
-
+# for Apple M1s
+if [ "$(uname -s)" == "Darwin" ] && [ "$(uname -m)" == "arm64" ]; then
+    arch="amd64"
+else
+    arch=$(uname -m)
+    arch=${arch/x86_64/amd64}
+    arch=${arch/aarch64/arm64}
+fi
 readonly os_arch_suffix="$(uname -s | tr '[:upper:]' '[:lower:]')-$arch"
 
 system=""

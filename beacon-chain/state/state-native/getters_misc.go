@@ -1,15 +1,9 @@
 package state_native
 
 import (
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 )
-
-// Id is the identifier of the beacon state.
-func (b *BeaconState) Id() uint64 {
-	return b.id
-}
 
 // GenesisTime of the beacon state as a uint64.
 func (b *BeaconState) GenesisTime() uint64 {
@@ -35,7 +29,7 @@ func (b *BeaconState) Version() int {
 }
 
 // Slot of the current beacon chain state.
-func (b *BeaconState) Slot() primitives.Slot {
+func (b *BeaconState) Slot() types.Slot {
 	b.lock.RLock()
 	defer b.lock.RUnlock()
 
@@ -73,35 +67,23 @@ func (b *BeaconState) forkVal() *ethpb.Fork {
 }
 
 // HistoricalRoots based on epochs stored in the beacon state.
-func (b *BeaconState) HistoricalRoots() ([][]byte, error) {
+func (b *BeaconState) HistoricalRoots() [][]byte {
 	if b.historicalRoots == nil {
-		return nil, nil
+		return nil
 	}
 
 	b.lock.RLock()
 	defer b.lock.RUnlock()
 
-	return b.historicalRoots.Slice(), nil
+	return b.historicalRoots.Slice()
 }
 
-// HistoricalSummaries of the beacon state.
-func (b *BeaconState) HistoricalSummaries() ([]*ethpb.HistoricalSummary, error) {
-	if b.version < version.Capella {
-		return nil, errNotSupported("HistoricalSummaries", b.version)
-	}
-
-	if b.historicalSummaries == nil {
-		return nil, nil
-	}
-
-	b.lock.RLock()
-	defer b.lock.RUnlock()
-
-	return b.historicalSummariesVal(), nil
-}
-
-// historicalSummariesVal of the beacon state.
+// balancesLength returns the length of the balances slice.
 // This assumes that a lock is already held on BeaconState.
-func (b *BeaconState) historicalSummariesVal() []*ethpb.HistoricalSummary {
-	return ethpb.CopyHistoricalSummaries(b.historicalSummaries)
+func (b *BeaconState) balancesLength() int {
+	if b.balances == nil {
+		return 0
+	}
+
+	return len(b.balances)
 }

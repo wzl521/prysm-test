@@ -8,50 +8,46 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/prysm/v5/async/abool"
-	mockChain "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	db "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/slashings"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/encoder"
-	p2ptest "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	mockSync "github.com/prysmaticlabs/prysm/v5/beacon-chain/sync/initial-sync/testing"
-	lruwrpr "github.com/prysmaticlabs/prysm/v5/cache/lru"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/flags"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/network/forks"
-	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/prysmaticlabs/prysm/v3/async/abool"
+	mockChain "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	db "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/slashings"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/encoder"
+	p2ptest "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/testing"
+	mockSync "github.com/prysmaticlabs/prysm/v3/beacon-chain/sync/initial-sync/testing"
+	lruwrpr "github.com/prysmaticlabs/prysm/v3/cache/lru"
+	"github.com/prysmaticlabs/prysm/v3/cmd/beacon-chain/flags"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v3/network/forks"
+	pb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/time/slots"
 	logTest "github.com/sirupsen/logrus/hooks/test"
 	"google.golang.org/protobuf/proto"
 )
 
 func TestSubscribe_ReceivesValidMessage(t *testing.T) {
 	p2pService := p2ptest.NewTestP2P(t)
-	gt := time.Now()
-	vr := [32]byte{'A'}
 	r := Service{
 		ctx: context.Background(),
 		cfg: &config{
 			p2p:         p2pService,
 			initialSync: &mockSync.Sync{IsSyncing: false},
 			chain: &mockChain.ChainService{
-				ValidatorsRoot: vr,
-				Genesis:        gt,
+				ValidatorsRoot: [32]byte{'A'},
+				Genesis:        time.Now(),
 			},
-			clock: startup.NewClock(gt, vr),
 		},
 		subHandler:   newSubTopicHandler(),
 		chainStarted: abool.New(),
@@ -83,18 +79,15 @@ func TestSubscribe_ReceivesValidMessage(t *testing.T) {
 
 func TestSubscribe_UnsubscribeTopic(t *testing.T) {
 	p2pService := p2ptest.NewTestP2P(t)
-	gt := time.Now()
-	vr := [32]byte{'A'}
 	r := Service{
 		ctx: context.Background(),
 		cfg: &config{
 			p2p:         p2pService,
 			initialSync: &mockSync.Sync{IsSyncing: false},
 			chain: &mockChain.ChainService{
-				ValidatorsRoot: vr,
-				Genesis:        gt,
+				ValidatorsRoot: [32]byte{'A'},
+				Genesis:        time.Now(),
 			},
-			clock: startup.NewClock(gt, vr),
 		},
 		chainStarted: abool.New(),
 		subHandler:   newSubTopicHandler(),
@@ -130,11 +123,9 @@ func TestSubscribe_ReceivesAttesterSlashing(t *testing.T) {
 	p2pService := p2ptest.NewTestP2P(t)
 	ctx := context.Background()
 	d := db.SetupDB(t)
-	gt := time.Now()
-	vr := [32]byte{'A'}
 	chainService := &mockChain.ChainService{
-		Genesis:        gt,
-		ValidatorsRoot: vr,
+		Genesis:        time.Now(),
+		ValidatorsRoot: [32]byte{'A'},
 	}
 	r := Service{
 		ctx: ctx,
@@ -143,7 +134,6 @@ func TestSubscribe_ReceivesAttesterSlashing(t *testing.T) {
 			initialSync:  &mockSync.Sync{IsSyncing: false},
 			slashingPool: slashings.NewPool(),
 			chain:        chainService,
-			clock:        startup.NewClock(gt, vr),
 			beaconDB:     d,
 		},
 		seenAttesterSlashingCache: make(map[uint64]bool),
@@ -197,7 +187,6 @@ func TestSubscribe_ReceivesProposerSlashing(t *testing.T) {
 			slashingPool: slashings.NewPool(),
 			chain:        chainService,
 			beaconDB:     d,
-			clock:        startup.NewClock(chainService.Genesis, chainService.ValidatorsRoot),
 		},
 		seenProposerSlashingCache: lruwrpr.New(10),
 		chainStarted:              abool.New(),
@@ -237,16 +226,14 @@ func TestSubscribe_ReceivesProposerSlashing(t *testing.T) {
 
 func TestSubscribe_HandlesPanic(t *testing.T) {
 	p := p2ptest.NewTestP2P(t)
-	chain := &mockChain.ChainService{
-		Genesis:        time.Now(),
-		ValidatorsRoot: [32]byte{'A'},
-	}
 	r := Service{
 		ctx: context.Background(),
 		cfg: &config{
-			chain: chain,
-			clock: startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
-			p2p:   p,
+			chain: &mockChain.ChainService{
+				Genesis:        time.Now(),
+				ValidatorsRoot: [32]byte{'A'},
+			},
+			p2p: p,
 		},
 		subHandler:   newSubTopicHandler(),
 		chainStarted: abool.New(),
@@ -274,16 +261,14 @@ func TestSubscribe_HandlesPanic(t *testing.T) {
 func TestRevalidateSubscription_CorrectlyFormatsTopic(t *testing.T) {
 	p := p2ptest.NewTestP2P(t)
 	hook := logTest.NewGlobal()
-	chain := &mockChain.ChainService{
-		Genesis:        time.Now(),
-		ValidatorsRoot: [32]byte{'A'},
-	}
 	r := Service{
 		ctx: context.Background(),
 		cfg: &config{
-			chain: chain,
-			clock: startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
-			p2p:   p,
+			chain: &mockChain.ChainService{
+				Genesis:        time.Now(),
+				ValidatorsRoot: [32]byte{'A'},
+			},
+			p2p: p,
 		},
 		chainStarted: abool.New(),
 		subHandler:   newSubTopicHandler(),
@@ -315,16 +300,14 @@ func TestRevalidateSubscription_CorrectlyFormatsTopic(t *testing.T) {
 func TestStaticSubnets(t *testing.T) {
 	p := p2ptest.NewTestP2P(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	chain := &mockChain.ChainService{
-		Genesis:        time.Now(),
-		ValidatorsRoot: [32]byte{'A'},
-	}
 	r := Service{
 		ctx: ctx,
 		cfg: &config{
-			chain: chain,
-			clock: startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
-			p2p:   p,
+			chain: &mockChain.ChainService{
+				Genesis:        time.Now(),
+				ValidatorsRoot: [32]byte{'A'},
+			},
+			p2p: p,
 		},
 		chainStarted: abool.New(),
 		subHandler:   newSubTopicHandler(),
@@ -335,10 +318,10 @@ func TestStaticSubnets(t *testing.T) {
 	r.subscribeStaticWithSubnets(defaultTopic, r.noopValidator, func(_ context.Context, msg proto.Message) error {
 		// no-op
 		return nil
-	}, d, params.BeaconConfig().AttestationSubnetCount)
+	}, d)
 	topics := r.cfg.p2p.PubSub().GetTopics()
-	if uint64(len(topics)) != params.BeaconConfig().AttestationSubnetCount {
-		t.Errorf("Wanted the number of subnet topics registered to be %d but got %d", params.BeaconConfig().AttestationSubnetCount, len(topics))
+	if uint64(len(topics)) != params.BeaconNetworkConfig().AttestationSubnetCount {
+		t.Errorf("Wanted the number of subnet topics registered to be %d but got %d", params.BeaconNetworkConfig().AttestationSubnetCount, len(topics))
 	}
 	cancel()
 }
@@ -444,7 +427,6 @@ func Test_wrapAndReportValidation(t *testing.T) {
 				chainStarted: chainStarted,
 				cfg: &config{
 					chain: mChain,
-					clock: startup.NewClock(mChain.Genesis, mChain.ValidatorsRoot),
 				},
 				subHandler: newSubTopicHandler(),
 			}
@@ -470,28 +452,19 @@ func TestFilterSubnetPeers(t *testing.T) {
 	defer flags.Init(new(flags.GlobalFlags))
 	p := p2ptest.NewTestP2P(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	currSlot := primitives.Slot(100)
-
-	gt := time.Now()
-	genPlus100 := func() time.Time {
-		return gt.Add(time.Second * time.Duration(uint64(currSlot)*params.BeaconConfig().SecondsPerSlot))
-	}
-	chain := &mockChain.ChainService{
-		Genesis:        gt,
-		ValidatorsRoot: [32]byte{'A'},
-		FinalizedRoots: map[[32]byte]bool{
-			{}: true,
-		},
-	}
-	clock := startup.NewClock(chain.Genesis, chain.ValidatorsRoot, startup.WithNower(genPlus100))
-	require.Equal(t, currSlot, clock.CurrentSlot())
+	currSlot := types.Slot(100)
 	r := Service{
 		ctx: ctx,
 		cfg: &config{
-			chain: chain,
-			clock: clock,
-			p2p:   p,
+			chain: &mockChain.ChainService{
+				Genesis:        time.Now(),
+				ValidatorsRoot: [32]byte{'A'},
+				Slot:           &currSlot,
+				FinalizedRoots: map[[32]byte]bool{
+					{}: true,
+				},
+			},
+			p2p: p,
 		},
 		chainStarted: abool.New(),
 		subHandler:   newSubTopicHandler(),
@@ -536,7 +509,9 @@ func TestFilterSubnetPeers(t *testing.T) {
 	}
 
 	recPeers = r.filterNeededPeers(wantedPeers)
-	assert.Equal(t, 1, len(recPeers), "expected at least 1 suitable peer to prune")
+	assert.DeepEqual(t, 1, len(recPeers), "expected at least 1 suitable peer to prune")
+
+	cancel()
 }
 
 func TestSubscribeWithSyncSubnets_StaticOK(t *testing.T) {
@@ -547,16 +522,16 @@ func TestSubscribeWithSyncSubnets_StaticOK(t *testing.T) {
 
 	p := p2ptest.NewTestP2P(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	chain := &mockChain.ChainService{
-		Genesis:        time.Now(),
-		ValidatorsRoot: [32]byte{'A'},
-	}
+	currSlot := types.Slot(100)
 	r := Service{
 		ctx: ctx,
 		cfg: &config{
-			chain: chain,
-			clock: startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
-			p2p:   p,
+			chain: &mockChain.ChainService{
+				Genesis:        time.Now(),
+				ValidatorsRoot: [32]byte{'A'},
+				Slot:           &currSlot,
+			},
+			p2p: p,
 		},
 		chainStarted: abool.New(),
 		subHandler:   newSubTopicHandler(),
@@ -578,24 +553,23 @@ func TestSubscribeWithSyncSubnets_DynamicOK(t *testing.T) {
 
 	p := p2ptest.NewTestP2P(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	gt := time.Now()
-	vr := [32]byte{'A'}
+	currSlot := types.Slot(100)
 	r := Service{
 		ctx: ctx,
 		cfg: &config{
 			chain: &mockChain.ChainService{
-				Genesis:        gt,
-				ValidatorsRoot: vr,
+				Genesis:        time.Now(),
+				ValidatorsRoot: [32]byte{'A'},
+				Slot:           &currSlot,
 			},
-			p2p:   p,
-			clock: startup.NewClock(gt, vr),
+			p2p: p,
 		},
 		chainStarted: abool.New(),
 		subHandler:   newSubTopicHandler(),
 	}
 	// Empty cache at the end of the test.
 	defer cache.SyncSubnetIDs.EmptyAllCaches()
-	slot := r.cfg.clock.CurrentSlot()
+	slot := r.cfg.chain.CurrentSlot()
 	currEpoch := slots.ToEpoch(slot)
 	cache.SyncSubnetIDs.AddSyncCommitteeSubnets([]byte("pubkey"), currEpoch, []uint64{0, 1}, 10*time.Second)
 	digest, err := r.currentForkDigest()
@@ -624,25 +598,23 @@ func TestSubscribeWithSyncSubnets_StaticSwitchFork(t *testing.T) {
 	params.OverrideBeaconConfig(cfg)
 	params.BeaconConfig().InitializeForkSchedule()
 	ctx, cancel := context.WithCancel(context.Background())
-	currSlot := primitives.Slot(100)
-	chain := &mockChain.ChainService{
-		Genesis:        time.Now().Add(-time.Duration(uint64(params.BeaconConfig().SlotsPerEpoch)*params.BeaconConfig().SecondsPerSlot) * time.Second),
-		ValidatorsRoot: [32]byte{'A'},
-		Slot:           &currSlot,
-	}
+	currSlot := types.Slot(100)
 	r := Service{
 		ctx: ctx,
 		cfg: &config{
-			chain: chain,
-			clock: startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
-			p2p:   p,
+			chain: &mockChain.ChainService{
+				Genesis:        time.Now().Add(-time.Duration(uint64(params.BeaconConfig().SlotsPerEpoch)*params.BeaconConfig().SecondsPerSlot) * time.Second),
+				ValidatorsRoot: [32]byte{'A'},
+				Slot:           &currSlot,
+			},
+			p2p: p,
 		},
 		chainStarted: abool.New(),
 		subHandler:   newSubTopicHandler(),
 	}
 	// Empty cache at the end of the test.
 	defer cache.SyncSubnetIDs.EmptyAllCaches()
-	genRoot := r.cfg.clock.GenesisValidatorsRoot()
+	genRoot := r.cfg.chain.GenesisValidatorsRoot()
 	digest, err := signing.ComputeForkDigest(params.BeaconConfig().GenesisForkVersion, genRoot[:])
 	assert.NoError(t, err)
 	r.subscribeStaticWithSyncSubnets(p2p.SyncCommitteeSubnetTopicFormat, nil, nil, digest)
@@ -665,19 +637,16 @@ func TestSubscribeWithSyncSubnets_DynamicSwitchFork(t *testing.T) {
 	params.OverrideBeaconConfig(cfg)
 	params.BeaconConfig().InitializeForkSchedule()
 	ctx, cancel := context.WithCancel(context.Background())
-	currSlot := primitives.Slot(100)
-	gt := time.Now().Add(-time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Second)
-	vr := [32]byte{'A'}
+	currSlot := types.Slot(100)
 	r := Service{
 		ctx: ctx,
 		cfg: &config{
 			chain: &mockChain.ChainService{
-				Genesis:        gt,
-				ValidatorsRoot: vr,
+				Genesis:        time.Now().Add(-time.Duration(params.BeaconConfig().SecondsPerSlot) * time.Second),
+				ValidatorsRoot: [32]byte{'A'},
 				Slot:           &currSlot,
 			},
-			clock: startup.NewClock(gt, vr),
-			p2p:   p,
+			p2p: p,
 		},
 		chainStarted: abool.New(),
 		subHandler:   newSubTopicHandler(),
@@ -685,7 +654,7 @@ func TestSubscribeWithSyncSubnets_DynamicSwitchFork(t *testing.T) {
 	// Empty cache at the end of the test.
 	defer cache.SyncSubnetIDs.EmptyAllCaches()
 	cache.SyncSubnetIDs.AddSyncCommitteeSubnets([]byte("pubkey"), 0, []uint64{0, 1}, 10*time.Second)
-	genRoot := r.cfg.clock.GenesisValidatorsRoot()
+	genRoot := r.cfg.chain.GenesisValidatorsRoot()
 	digest, err := signing.ComputeForkDigest(params.BeaconConfig().GenesisForkVersion, genRoot[:])
 	assert.NoError(t, err)
 

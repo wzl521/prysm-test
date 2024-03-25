@@ -4,8 +4,8 @@ import (
 	"bytes"
 
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 )
 
 // JustificationBits marking which epochs have been justified in the beacon chain.
@@ -113,7 +113,7 @@ func (b *BeaconState) finalizedCheckpointVal() *ethpb.Checkpoint {
 }
 
 // FinalizedCheckpointEpoch returns the epoch value of the finalized checkpoint.
-func (b *BeaconState) FinalizedCheckpointEpoch() primitives.Epoch {
+func (b *BeaconState) FinalizedCheckpointEpoch() types.Epoch {
 	if b.finalizedCheckpoint == nil {
 		return 0
 	}

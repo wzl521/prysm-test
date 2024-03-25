@@ -6,11 +6,11 @@ import (
 	"testing"
 
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 	"github.com/sirupsen/logrus"
 	logTest "github.com/sirupsen/logrus/hooks/test"
 )
@@ -103,7 +103,7 @@ func TestProcessUnaggregatedAttestationStateCached(t *testing.T) {
 	participation := []byte{0xff, 0xff, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	require.NoError(t, state.SetCurrentParticipationBits(participation))
 
-	var root [32]byte
+	root := [32]byte{}
 	copy(root[:], "hello-world")
 
 	att := &ethpb.Attestation{
@@ -175,7 +175,7 @@ func TestProcessAggregatedAttestationStateCached(t *testing.T) {
 	participation := []byte{0xff, 0xff, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	require.NoError(t, state.SetCurrentParticipationBits(participation))
 
-	var root [32]byte
+	root := [32]byte{}
 	copy(root[:], "hello-world")
 
 	att := &ethpb.AggregateAttestationAndProof{

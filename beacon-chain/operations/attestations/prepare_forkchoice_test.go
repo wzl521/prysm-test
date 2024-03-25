@@ -7,12 +7,12 @@ import (
 	"testing"
 
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	attaggregation "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/attestation/aggregation/attestations"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	attaggregation "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/attestation/aggregation/attestations"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -88,9 +88,7 @@ func TestBatchAttestations_Multiple(t *testing.T) {
 	}
 	require.NoError(t, s.cfg.Pool.SaveUnaggregatedAttestations(unaggregatedAtts))
 	require.NoError(t, s.cfg.Pool.SaveAggregatedAttestations(aggregatedAtts))
-	for _, att := range blockAtts {
-		require.NoError(t, s.cfg.Pool.SaveBlockAttestation(att))
-	}
+	require.NoError(t, s.cfg.Pool.SaveBlockAttestations(blockAtts))
 	require.NoError(t, s.batchForkChoiceAtts(context.Background()))
 
 	wanted, err := attaggregation.Aggregate([]*ethpb.Attestation{aggregatedAtts[0], blockAtts[0]})
@@ -122,7 +120,7 @@ func TestBatchAttestations_Single(t *testing.T) {
 	priv, err := bls.RandKey()
 	require.NoError(t, err)
 	sig := priv.Sign([]byte("dummy_test_data"))
-	var mockRoot [32]byte
+	mockRoot := [32]byte{}
 	d := &ethpb.AttestationData{
 		BeaconBlockRoot: mockRoot[:],
 		Source:          &ethpb.Checkpoint{Root: mockRoot[:]},
@@ -144,10 +142,7 @@ func TestBatchAttestations_Single(t *testing.T) {
 	}
 	require.NoError(t, s.cfg.Pool.SaveUnaggregatedAttestations(unaggregatedAtts))
 	require.NoError(t, s.cfg.Pool.SaveAggregatedAttestations(aggregatedAtts))
-
-	for _, att := range blockAtts {
-		require.NoError(t, s.cfg.Pool.SaveBlockAttestation(att))
-	}
+	require.NoError(t, s.cfg.Pool.SaveBlockAttestations(blockAtts))
 	require.NoError(t, s.batchForkChoiceAtts(context.Background()))
 
 	wanted, err := attaggregation.Aggregate(append(aggregatedAtts, unaggregatedAtts...))
@@ -167,7 +162,7 @@ func TestAggregateAndSaveForkChoiceAtts_Single(t *testing.T) {
 	priv, err := bls.RandKey()
 	require.NoError(t, err)
 	sig := priv.Sign([]byte("dummy_test_data"))
-	var mockRoot [32]byte
+	mockRoot := [32]byte{}
 	d := &ethpb.AttestationData{
 		BeaconBlockRoot: mockRoot[:],
 		Source:          &ethpb.Checkpoint{Root: mockRoot[:]},
@@ -191,7 +186,7 @@ func TestAggregateAndSaveForkChoiceAtts_Multiple(t *testing.T) {
 	priv, err := bls.RandKey()
 	require.NoError(t, err)
 	sig := priv.Sign([]byte("dummy_test_data"))
-	var mockRoot [32]byte
+	mockRoot := [32]byte{}
 	d := &ethpb.AttestationData{
 		BeaconBlockRoot: mockRoot[:],
 		Source:          &ethpb.Checkpoint{Root: mockRoot[:]},
@@ -232,9 +227,7 @@ func TestAggregateAndSaveForkChoiceAtts_Multiple(t *testing.T) {
 	sort.Slice(received, func(i, j int) bool {
 		return received[i].Data.Slot < received[j].Data.Slot
 	})
-	for i, a := range wanted {
-		assert.Equal(t, true, proto.Equal(a, received[i]))
-	}
+	assert.DeepEqual(t, wanted, received)
 }
 
 func TestSeenAttestations_PresentInCache(t *testing.T) {

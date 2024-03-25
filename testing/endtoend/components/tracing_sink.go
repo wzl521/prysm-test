@@ -12,12 +12,9 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/helpers"
-	e2e "github.com/prysmaticlabs/prysm/v5/testing/endtoend/params"
-	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/types"
+	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/helpers"
+	e2e "github.com/prysmaticlabs/prysm/v3/testing/endtoend/params"
 )
-
-var _ types.ComponentRunner = &TracingSink{}
 
 // TracingSink to capture HTTP requests from opentracing pushes. This is meant
 // to capture all opentracing spans from Prysm during an end-to-end test. Spans
@@ -148,8 +145,4 @@ func captureRequest(f io.Writer, r *http.Request) error {
 		return err
 	}
 	return nil
-}
-
-func (ts *TracingSink) UnderlyingProcess() *os.Process {
-	return nil // No subprocess for this component.
 }

@@ -2,9 +2,9 @@ package synccommittee
 
 import (
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/container/queue"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v3/container/queue"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 )
 
 // SaveSyncCommitteeMessage saves a sync committee message in to a priority queue.
@@ -30,22 +30,8 @@ func (s *Store) SaveSyncCommitteeMessage(msg *ethpb.SyncCommitteeMessage) error 
 			return errors.New("not typed []ethpb.SyncCommitteeMessage")
 		}
 
-		idx := -1
-		for i, msg := range messages {
-			if msg.ValidatorIndex == copied.ValidatorIndex {
-				idx = i
-				break
-			}
-		}
-		if idx >= 0 {
-			// Override the existing messages with a new one
-			messages[idx] = copied
-		} else {
-			// Append the new message
-			messages = append(messages, copied)
-			savedSyncCommitteeMessageTotal.Inc()
-		}
-
+		messages = append(messages, copied)
+		savedSyncCommitteeMessageTotal.Inc()
 		return s.messageCache.Push(&queue.Item{
 			Key:      syncCommitteeKey(msg.Slot),
 			Value:    messages,
@@ -74,9 +60,8 @@ func (s *Store) SaveSyncCommitteeMessage(msg *ethpb.SyncCommitteeMessage) error 
 }
 
 // SyncCommitteeMessages returns sync committee messages by slot from the priority queue.
-// When calling this method a copy is avoided as the caller is assumed to be only reading the
-// messages from the store rather than modifying it.
-func (s *Store) SyncCommitteeMessages(slot primitives.Slot) ([]*ethpb.SyncCommitteeMessage, error) {
+// Upon retrieval, the message is removed from the queue.
+func (s *Store) SyncCommitteeMessages(slot types.Slot) ([]*ethpb.SyncCommitteeMessage, error) {
 	s.messageLock.RLock()
 	defer s.messageLock.RUnlock()
 

@@ -4,12 +4,12 @@ import (
 	"reflect"
 	"testing"
 
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/encoding/ssz"
-	enginev1 "github.com/prysmaticlabs/prysm/v5/proto/engine/v1"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/crypto/hash"
+	"github.com/prysmaticlabs/prysm/v3/encoding/ssz"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func TestUint64Root(t *testing.T) {
@@ -34,13 +34,14 @@ func TestForkRoot(t *testing.T) {
 }
 
 func TestCheckPointRoot(t *testing.T) {
+	testHasher := hash.CustomSHA256Hasher()
 	testCheckpoint := ethpb.Checkpoint{
 		Epoch: 1234567890,
 		Root:  []byte{222},
 	}
 	expected := [32]byte{228, 65, 39, 109, 183, 249, 167, 232, 125, 239, 25, 155, 207, 4, 84, 174, 176, 229, 175, 224, 62, 33, 215, 254, 170, 220, 132, 65, 246, 128, 68, 194}
 
-	result, err := ssz.CheckpointRoot(&testCheckpoint)
+	result, err := ssz.CheckpointRoot(testHasher, &testCheckpoint)
 	require.NoError(t, err)
 	assert.Equal(t, expected, result)
 }
@@ -122,58 +123,6 @@ func TestTransactionsRoot(t *testing.T) {
 	}
 }
 
-func TestByteSliceRoot(t *testing.T) {
-	tests := []struct {
-		name      string
-		slice     []byte
-		maxLength uint64
-		want      [32]byte
-		wantErr   bool
-	}{
-		{
-			name:  "nil",
-			slice: nil,
-			want:  [32]byte{245, 165, 253, 66, 209, 106, 32, 48, 39, 152, 239, 110, 211, 9, 151, 155, 67, 0, 61, 35, 32, 217, 240, 232, 234, 152, 49, 169, 39, 89, 251, 75},
-		},
-		{
-			name:  "empty",
-			slice: []byte{},
-			want:  [32]byte{245, 165, 253, 66, 209, 106, 32, 48, 39, 152, 239, 110, 211, 9, 151, 155, 67, 0, 61, 35, 32, 217, 240, 232, 234, 152, 49, 169, 39, 89, 251, 75},
-		},
-		{
-			name:  "byte slice 3 values",
-			slice: []byte{1, 2, 3},
-			want:  [32]byte{20, 159, 26, 252, 247, 204, 44, 159, 161, 135, 211, 195, 106, 59, 220, 149, 199, 163, 228, 155, 113, 118, 64, 126, 173, 223, 102, 1, 241, 158, 164, 185},
-		},
-		{
-			name:  "byte slice 32 values",
-			slice: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32},
-			want:  [32]byte{7, 30, 46, 77, 237, 240, 59, 126, 232, 232, 232, 6, 145, 210, 31, 18, 117, 12, 217, 40, 204, 141, 90, 236, 241, 128, 221, 45, 126, 39, 39, 202},
-		},
-		{
-			name:    "over max length",
-			slice:   make([]byte, fieldparams.RootLength+1),
-			want:    [32]byte{},
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.maxLength == 0 {
-				tt.maxLength = fieldparams.RootLength
-			}
-			got, err := ssz.ByteSliceRoot(tt.slice, tt.maxLength)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ByteSliceRoot() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ByteSliceRoot() got = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestPackByChunk_SingleList(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -204,76 +153,6 @@ func TestPackByChunk_SingleList(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ssz.PackByChunk([][]byte{tt.input})
-			require.NoError(t, err)
-			require.DeepSSZEqual(t, tt.want, got)
-		})
-	}
-}
-
-func TestWithdrawalRoot(t *testing.T) {
-	tests := []struct {
-		name  string
-		input *enginev1.Withdrawal
-		want  [32]byte
-	}{
-		{
-			name:  "nil",
-			input: &enginev1.Withdrawal{},
-			want:  [32]byte{0xdb, 0x56, 0x11, 0x4e, 0x0, 0xfd, 0xd4, 0xc1, 0xf8, 0x5c, 0x89, 0x2b, 0xf3, 0x5a, 0xc9, 0xa8, 0x92, 0x89, 0xaa, 0xec, 0xb1, 0xeb, 0xd0, 0xa9, 0x6c, 0xde, 0x60, 0x6a, 0x74, 0x8b, 0x5d, 0x71},
-		},
-		{
-			name: "empty",
-			input: &enginev1.Withdrawal{
-				Address: make([]byte, 20),
-			},
-			want: [32]byte{0xdb, 0x56, 0x11, 0x4e, 0x0, 0xfd, 0xd4, 0xc1, 0xf8, 0x5c, 0x89, 0x2b, 0xf3, 0x5a, 0xc9, 0xa8, 0x92, 0x89, 0xaa, 0xec, 0xb1, 0xeb, 0xd0, 0xa9, 0x6c, 0xde, 0x60, 0x6a, 0x74, 0x8b, 0x5d, 0x71},
-		},
-		{
-			name: "non-empty",
-			input: &enginev1.Withdrawal{
-				Index:          123,
-				ValidatorIndex: 123123,
-				Address:        []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
-				Amount:         50,
-			},
-			want: [32]byte{0x4f, 0xca, 0x3a, 0x43, 0x6e, 0xcc, 0x34, 0xad, 0x33, 0xde, 0x3c, 0x22, 0xa3, 0x32, 0x27, 0xa, 0x8c, 0x4e, 0x75, 0xd8, 0x39, 0xc1, 0xd7, 0x55, 0x78, 0x77, 0xd7, 0x14, 0x6b, 0x34, 0x6a, 0xb6},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ssz.WithdrawalRoot(tt.input)
-			require.NoError(t, err)
-			require.DeepSSZEqual(t, tt.want, got)
-		})
-	}
-}
-
-func TestWithrawalSliceRoot(t *testing.T) {
-	tests := []struct {
-		name  string
-		input []*enginev1.Withdrawal
-		want  [32]byte
-	}{
-		{
-			name:  "empty",
-			input: make([]*enginev1.Withdrawal, 0),
-			want:  [32]byte{0x79, 0x29, 0x30, 0xbb, 0xd5, 0xba, 0xac, 0x43, 0xbc, 0xc7, 0x98, 0xee, 0x49, 0xaa, 0x81, 0x85, 0xef, 0x76, 0xbb, 0x3b, 0x44, 0xba, 0x62, 0xb9, 0x1d, 0x86, 0xae, 0x56, 0x9e, 0x4b, 0xb5, 0x35},
-		},
-		{
-			name: "non-empty",
-			input: []*enginev1.Withdrawal{{
-				Index:          123,
-				ValidatorIndex: 123123,
-				Address:        []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
-				Amount:         50,
-			},
-			},
-			want: [32]byte{0x10, 0x34, 0x29, 0xd1, 0x34, 0x30, 0xa0, 0x1c, 0x4, 0xdd, 0x3, 0xed, 0xe6, 0xa6, 0x33, 0xb2, 0xc9, 0x24, 0x23, 0x5c, 0x43, 0xca, 0xb2, 0x32, 0xaa, 0xed, 0xfe, 0xd5, 0x9, 0x78, 0xd1, 0x6f},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ssz.WithdrawalSliceRoot(tt.input, 16)
 			require.NoError(t, err)
 			require.DeepSSZEqual(t, tt.want, got)
 		})

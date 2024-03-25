@@ -4,12 +4,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
 )
 
 func VerifyBeaconStateSlotDataRace(t *testing.T, factory getState) {
@@ -31,6 +31,20 @@ func VerifyBeaconStateSlotDataRace(t *testing.T, factory getState) {
 }
 
 type getStateWithCurrentJustifiedCheckpoint func(*ethpb.Checkpoint) (state.BeaconState, error)
+type clearInternalState func(state.BeaconState)
+
+func VerifyBeaconStateMatchCurrentJustifiedCheckpt(t *testing.T, factory getStateWithCurrentJustifiedCheckpoint, clear clearInternalState) {
+	c1 := &ethpb.Checkpoint{Epoch: 1}
+	c2 := &ethpb.Checkpoint{Epoch: 2}
+	beaconState, err := factory(c1)
+	require.NoError(t, err)
+	require.Equal(t, true, beaconState.MatchCurrentJustifiedCheckpoint(c1))
+	require.Equal(t, false, beaconState.MatchCurrentJustifiedCheckpoint(c2))
+	require.Equal(t, false, beaconState.MatchPreviousJustifiedCheckpoint(c1))
+	require.Equal(t, false, beaconState.MatchPreviousJustifiedCheckpoint(c2))
+	clear(beaconState)
+	require.Equal(t, false, beaconState.MatchCurrentJustifiedCheckpoint(c1))
+}
 
 func VerifyBeaconStateMatchCurrentJustifiedCheckptNative(t *testing.T, factory getStateWithCurrentJustifiedCheckpoint) {
 	c1 := &ethpb.Checkpoint{Epoch: 1}
@@ -41,6 +55,19 @@ func VerifyBeaconStateMatchCurrentJustifiedCheckptNative(t *testing.T, factory g
 	require.Equal(t, false, beaconState.MatchCurrentJustifiedCheckpoint(c2))
 	require.Equal(t, false, beaconState.MatchPreviousJustifiedCheckpoint(c1))
 	require.Equal(t, false, beaconState.MatchPreviousJustifiedCheckpoint(c2))
+}
+
+func VerifyBeaconStateMatchPreviousJustifiedCheckpt(t *testing.T, factory getStateWithCurrentJustifiedCheckpoint, clear clearInternalState) {
+	c1 := &ethpb.Checkpoint{Epoch: 1}
+	c2 := &ethpb.Checkpoint{Epoch: 2}
+	beaconState, err := factory(c1)
+	require.NoError(t, err)
+	require.Equal(t, false, beaconState.MatchCurrentJustifiedCheckpoint(c1))
+	require.Equal(t, false, beaconState.MatchCurrentJustifiedCheckpoint(c2))
+	require.Equal(t, true, beaconState.MatchPreviousJustifiedCheckpoint(c1))
+	require.Equal(t, false, beaconState.MatchPreviousJustifiedCheckpoint(c2))
+	clear(beaconState)
+	require.Equal(t, false, beaconState.MatchPreviousJustifiedCheckpoint(c1))
 }
 
 func VerifyBeaconStateMatchPreviousJustifiedCheckptNative(t *testing.T, factory getStateWithCurrentJustifiedCheckpoint) {
@@ -54,9 +81,17 @@ func VerifyBeaconStateMatchPreviousJustifiedCheckptNative(t *testing.T, factory 
 	require.Equal(t, false, beaconState.MatchPreviousJustifiedCheckpoint(c2))
 }
 
+func VerifyBeaconStateMarshalSSZNilState(t *testing.T, factory getState, clear clearInternalState) {
+	s, err := factory()
+	require.NoError(t, err)
+	clear(s)
+	_, err = s.MarshalSSZ()
+	require.ErrorContains(t, "nil beacon state", err)
+}
+
 func VerifyBeaconStateValidatorByPubkey(t *testing.T, factory getState) {
 	keyCreator := func(input []byte) [fieldparams.BLSPubkeyLength]byte {
-		var nKey [fieldparams.BLSPubkeyLength]byte
+		nKey := [fieldparams.BLSPubkeyLength]byte{}
 		copy(nKey[:1], input)
 		return nKey
 	}
@@ -65,8 +100,8 @@ func VerifyBeaconStateValidatorByPubkey(t *testing.T, factory getState) {
 		name            string
 		modifyFunc      func(b state.BeaconState, k [fieldparams.BLSPubkeyLength]byte)
 		exists          bool
-		expectedIdx     primitives.ValidatorIndex
-		largestIdxInSet primitives.ValidatorIndex
+		expectedIdx     types.ValidatorIndex
+		largestIdxInSet types.ValidatorIndex
 	}{
 		{
 			name: "retrieve validator",
@@ -123,6 +158,7 @@ func VerifyBeaconStateValidatorByPubkey(t *testing.T, factory getState) {
 				n := b.Copy()
 				// Append to another state
 				assert.NoError(t, n.AppendValidator(&ethpb.Validator{PublicKey: key[:]}))
+
 			},
 			exists:      false,
 			expectedIdx: 0,
@@ -135,6 +171,7 @@ func VerifyBeaconStateValidatorByPubkey(t *testing.T, factory getState) {
 				n := b.Copy()
 				// Append to another state
 				assert.NoError(t, n.AppendValidator(&ethpb.Validator{PublicKey: key[:]}))
+
 			},
 			exists:      false,
 			expectedIdx: 0,

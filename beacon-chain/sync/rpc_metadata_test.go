@@ -7,24 +7,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain"
-	mock "github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
-	db "github.com/prysmaticlabs/prysm/v5/beacon-chain/db/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
-	p2ptest "github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/testing"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/wrapper"
-	leakybucket "github.com/prysmaticlabs/prysm/v5/container/leaky-bucket"
-	"github.com/prysmaticlabs/prysm/v5/encoding/ssz/equality"
-	pb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/metadata"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/testing/util"
+	"github.com/kevinms/leakybucket-go"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/protocol"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain"
+	mock "github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
+	db "github.com/prysmaticlabs/prysm/v3/beacon-chain/db/testing"
+	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
+	p2ptest "github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/testing"
+	"github.com/prysmaticlabs/prysm/v3/config/params"
+	"github.com/prysmaticlabs/prysm/v3/consensus-types/wrapper"
+	"github.com/prysmaticlabs/prysm/v3/encoding/ssz/equality"
+	pb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/metadata"
+	"github.com/prysmaticlabs/prysm/v3/testing/assert"
+	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v3/testing/util"
 )
 
 func TestMetaDataRPCHandler_ReceivesMetadata(t *testing.T) {
@@ -54,7 +53,7 @@ func TestMetaDataRPCHandler_ReceivesMetadata(t *testing.T) {
 	// Setup streams
 	pcl := protocol.ID(p2p.RPCMetaDataTopicV1)
 	topic := string(pcl)
-	r.rateLimiter.limiterMap[topic] = leakybucket.NewCollector(1, 1, time.Second, false)
+	r.rateLimiter.limiterMap[topic] = leakybucket.NewCollector(1, 1, false)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	p2.BHost.SetStreamHandler(pcl, func(stream network.Stream) {
@@ -91,14 +90,12 @@ func TestMetadataRPCHandler_SendsMetadata(t *testing.T) {
 	})
 
 	// Set up a head state in the database with data we expect.
-	chain := &mock.ChainService{Genesis: time.Now(), ValidatorsRoot: [32]byte{}}
 	d := db.SetupDB(t)
 	r := &Service{
 		cfg: &config{
 			beaconDB: d,
 			p2p:      p1,
-			chain:    chain,
-			clock:    startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
+			chain:    &mock.ChainService{Genesis: time.Now(), ValidatorsRoot: [32]byte{}},
 		},
 		rateLimiter: newRateLimiter(p1),
 	}
@@ -115,8 +112,8 @@ func TestMetadataRPCHandler_SendsMetadata(t *testing.T) {
 	// Setup streams
 	pcl := protocol.ID(p2p.RPCMetaDataTopicV1 + r.cfg.p2p.Encoding().ProtocolSuffix())
 	topic := string(pcl)
-	r.rateLimiter.limiterMap[topic] = leakybucket.NewCollector(1, 1, time.Second, false)
-	r2.rateLimiter.limiterMap[topic] = leakybucket.NewCollector(1, 1, time.Second, false)
+	r.rateLimiter.limiterMap[topic] = leakybucket.NewCollector(1, 1, false)
+	r2.rateLimiter.limiterMap[topic] = leakybucket.NewCollector(1, 1, false)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -161,24 +158,20 @@ func TestMetadataRPCHandler_SendsMetadataAltair(t *testing.T) {
 
 	// Set up a head state in the database with data we expect.
 	d := db.SetupDB(t)
-	chain := &mock.ChainService{Genesis: time.Now().Add(-5 * oneEpoch()), ValidatorsRoot: [32]byte{}}
 	r := &Service{
 		cfg: &config{
 			beaconDB: d,
 			p2p:      p1,
-			chain:    chain,
-			clock:    startup.NewClock(chain.Genesis, chain.ValidatorsRoot),
+			chain:    &mock.ChainService{Genesis: time.Now().Add(-5 * oneEpoch()), ValidatorsRoot: [32]byte{}},
 		},
 		rateLimiter: newRateLimiter(p1),
 	}
 
-	chain2 := &mock.ChainService{Genesis: time.Now().Add(-5 * oneEpoch()), ValidatorsRoot: [32]byte{}}
 	r2 := &Service{
 		cfg: &config{
 			beaconDB: d,
 			p2p:      p2,
-			chain:    chain2,
-			clock:    startup.NewClock(chain2.Genesis, chain2.ValidatorsRoot),
+			chain:    &mock.ChainService{Genesis: time.Now().Add(-5 * oneEpoch()), ValidatorsRoot: [32]byte{}},
 		},
 		rateLimiter: newRateLimiter(p2),
 	}
@@ -186,8 +179,8 @@ func TestMetadataRPCHandler_SendsMetadataAltair(t *testing.T) {
 	// Setup streams
 	pcl := protocol.ID(p2p.RPCMetaDataTopicV2 + r.cfg.p2p.Encoding().ProtocolSuffix())
 	topic := string(pcl)
-	r.rateLimiter.limiterMap[topic] = leakybucket.NewCollector(2, 2, time.Second, false)
-	r2.rateLimiter.limiterMap[topic] = leakybucket.NewCollector(2, 2, time.Second, false)
+	r.rateLimiter.limiterMap[topic] = leakybucket.NewCollector(2, 2, false)
+	r2.rateLimiter.limiterMap[topic] = leakybucket.NewCollector(2, 2, false)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -243,7 +236,7 @@ func TestExtractMetaDataType(t *testing.T) {
 
 	type args struct {
 		digest []byte
-		clock  blockchain.TemporalOracle
+		chain  blockchain.ChainInfoFetcher
 	}
 	tests := []struct {
 		name    string
@@ -255,7 +248,7 @@ func TestExtractMetaDataType(t *testing.T) {
 			name: "no digest",
 			args: args{
 				digest: []byte{},
-				clock:  startup.NewClock(time.Now(), [32]byte{}),
+				chain:  &mock.ChainService{ValidatorsRoot: [32]byte{}},
 			},
 			want:    wrapper.WrappedMetadataV0(&pb.MetaDataV0{}),
 			wantErr: false,
@@ -264,7 +257,7 @@ func TestExtractMetaDataType(t *testing.T) {
 			name: "invalid digest",
 			args: args{
 				digest: []byte{0x00, 0x01},
-				clock:  startup.NewClock(time.Now(), [32]byte{}),
+				chain:  &mock.ChainService{ValidatorsRoot: [32]byte{}},
 			},
 			want:    nil,
 			wantErr: true,
@@ -273,7 +266,7 @@ func TestExtractMetaDataType(t *testing.T) {
 			name: "non existent digest",
 			args: args{
 				digest: []byte{0x00, 0x01, 0x02, 0x03},
-				clock:  startup.NewClock(time.Now(), [32]byte{}),
+				chain:  &mock.ChainService{ValidatorsRoot: [32]byte{}},
 			},
 			want:    nil,
 			wantErr: true,
@@ -282,7 +275,7 @@ func TestExtractMetaDataType(t *testing.T) {
 			name: "genesis fork version",
 			args: args{
 				digest: genDigest[:],
-				clock:  startup.NewClock(time.Now(), [32]byte{}),
+				chain:  &mock.ChainService{ValidatorsRoot: [32]byte{}},
 			},
 			want:    wrapper.WrappedMetadataV0(&pb.MetaDataV0{}),
 			wantErr: false,
@@ -291,7 +284,7 @@ func TestExtractMetaDataType(t *testing.T) {
 			name: "altair fork version",
 			args: args{
 				digest: altairDigest[:],
-				clock:  startup.NewClock(time.Now(), [32]byte{}),
+				chain:  &mock.ChainService{ValidatorsRoot: [32]byte{}},
 			},
 			want:    wrapper.WrappedMetadataV1(&pb.MetaDataV1{}),
 			wantErr: false,
@@ -299,7 +292,7 @@ func TestExtractMetaDataType(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := extractMetaDataType(tt.args.digest, tt.args.clock)
+			got, err := extractMetaDataType(tt.args.digest, tt.args.chain)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("extractMetaDataType() error = %v, wantErr %v", err, tt.wantErr)
 				return

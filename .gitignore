@@ -38,6 +38,3 @@ metaData
 
 # execution API authentication
 jwt.hex
-
-# manual testing
-tmp

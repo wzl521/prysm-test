@@ -5,10 +5,10 @@ import (
 	"encoding/binary"
 
 	"github.com/pkg/errors"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	enginev1 "github.com/prysmaticlabs/prysm/v5/proto/engine/v1"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v3/crypto/hash"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 )
 
 // Uint64Root computes the HashTreeRoot Merkleization of
@@ -33,13 +33,13 @@ func ForkRoot(fork *ethpb.Fork) ([32]byte, error) {
 		binary.LittleEndian.PutUint64(forkEpochBuf, uint64(fork.Epoch))
 		fieldRoots[2] = bytesutil.ToBytes32(forkEpochBuf)
 	}
-	return BitwiseMerkleize(fieldRoots, uint64(len(fieldRoots)), uint64(len(fieldRoots)))
+	return BitwiseMerkleize(hash.CustomSHA256Hasher(), fieldRoots, uint64(len(fieldRoots)), uint64(len(fieldRoots)))
 }
 
 // CheckpointRoot computes the HashTreeRoot Merkleization of
 // a InitWithReset struct value according to the Ethereum
 // Simple Serialize specification.
-func CheckpointRoot(checkpoint *ethpb.Checkpoint) ([32]byte, error) {
+func CheckpointRoot(hasher HashFn, checkpoint *ethpb.Checkpoint) ([32]byte, error) {
 	fieldRoots := make([][32]byte, 2)
 	if checkpoint != nil {
 		epochBuf := make([]byte, 8)
@@ -47,7 +47,7 @@ func CheckpointRoot(checkpoint *ethpb.Checkpoint) ([32]byte, error) {
 		fieldRoots[0] = bytesutil.ToBytes32(epochBuf)
 		fieldRoots[1] = bytesutil.ToBytes32(checkpoint.Root)
 	}
-	return BitwiseMerkleize(fieldRoots, uint64(len(fieldRoots)), uint64(len(fieldRoots)))
+	return BitwiseMerkleize(hasher, fieldRoots, uint64(len(fieldRoots)), uint64(len(fieldRoots)))
 }
 
 // ByteArrayRootWithLimit computes the HashTreeRoot Merkleization of
@@ -58,7 +58,7 @@ func ByteArrayRootWithLimit(roots [][]byte, limit uint64) ([32]byte, error) {
 	for i, r := range roots {
 		copy(newRoots[i][:], r)
 	}
-	result, err := BitwiseMerkleize(newRoots, uint64(len(newRoots)), limit)
+	result, err := BitwiseMerkleize(hash.CustomSHA256Hasher(), newRoots, uint64(len(newRoots)), limit)
 	if err != nil {
 		return [32]byte{}, errors.Wrap(err, "could not compute byte array merkleization")
 	}
@@ -87,23 +87,24 @@ func SlashingsRoot(slashings []uint64) ([32]byte, error) {
 	if err != nil {
 		return [32]byte{}, errors.Wrap(err, "could not pack slashings into chunks")
 	}
-	return BitwiseMerkleize(slashingChunks, uint64(len(slashingChunks)), uint64(len(slashingChunks)))
+	return BitwiseMerkleize(hash.CustomSHA256Hasher(), slashingChunks, uint64(len(slashingChunks)), uint64(len(slashingChunks)))
 }
 
 // TransactionsRoot computes the HTR for the Transactions' property of the ExecutionPayload
 // The code was largely copy/pasted from the code generated to compute the HTR of the entire
 // ExecutionPayload.
 func TransactionsRoot(txs [][]byte) ([32]byte, error) {
+	hasher := hash.CustomSHA256Hasher()
 	txRoots := make([][32]byte, 0)
 	for i := 0; i < len(txs); i++ {
-		rt, err := ByteSliceRoot(txs[i], fieldparams.MaxBytesPerTxLength) // getting the transaction root here
+		rt, err := transactionRoot(txs[i])
 		if err != nil {
 			return [32]byte{}, err
 		}
 		txRoots = append(txRoots, rt)
 	}
 
-	bytesRoot, err := BitwiseMerkleize(txRoots, uint64(len(txRoots)), fieldparams.MaxTxsPerPayloadLength)
+	bytesRoot, err := BitwiseMerkleize(hasher, txRoots, uint64(len(txRoots)), fieldparams.MaxTxsPerPayloadLength)
 	if err != nil {
 		return [32]byte{}, errors.Wrap(err, "could not compute  merkleization")
 	}
@@ -116,62 +117,23 @@ func TransactionsRoot(txs [][]byte) ([32]byte, error) {
 	return MixInLength(bytesRoot, bytesRootBufRoot), nil
 }
 
-// WithdrawalSliceRoot computes the HTR of a slice of withdrawals.
-// The limit parameter is used as input to the bitwise merkleization algorithm.
-func WithdrawalSliceRoot(withdrawals []*enginev1.Withdrawal, limit uint64) ([32]byte, error) {
-	roots := make([][32]byte, len(withdrawals))
-	for i := 0; i < len(withdrawals); i++ {
-		r, err := withdrawalRoot(withdrawals[i])
-		if err != nil {
-			return [32]byte{}, err
-		}
-		roots[i] = r
-	}
-
-	bytesRoot, err := BitwiseMerkleize(roots, uint64(len(roots)), limit)
-	if err != nil {
-		return [32]byte{}, errors.Wrap(err, "could not compute  merkleization")
-	}
-	bytesRootBuf := new(bytes.Buffer)
-	if err := binary.Write(bytesRootBuf, binary.LittleEndian, uint64(len(withdrawals))); err != nil {
-		return [32]byte{}, errors.Wrap(err, "could not marshal length")
-	}
-	bytesRootBufRoot := make([]byte, 32)
-	copy(bytesRootBufRoot, bytesRootBuf.Bytes())
-	return MixInLength(bytesRoot, bytesRootBufRoot), nil
-}
-
-// ByteSliceRoot is a helper func to merkleize an arbitrary List[Byte, N]
-// this func runs Chunkify + MerkleizeVector
-// max length is dividable by 32 ( root length )
-func ByteSliceRoot(slice []byte, maxLength uint64) ([32]byte, error) {
-	chunkedRoots, err := PackByChunk([][]byte{slice})
+func transactionRoot(tx []byte) ([32]byte, error) {
+	hasher := hash.CustomSHA256Hasher()
+	chunkedRoots, err := PackByChunk([][]byte{tx})
 	if err != nil {
 		return [32]byte{}, err
 	}
-	maxRootLength := (maxLength + 31) / 32 // nearest number divisible by root length (32)
-	bytesRoot, err := BitwiseMerkleize(chunkedRoots, uint64(len(chunkedRoots)), maxRootLength)
+
+	maxLength := (fieldparams.MaxBytesPerTxLength + 31) / 32
+	bytesRoot, err := BitwiseMerkleize(hasher, chunkedRoots, uint64(len(chunkedRoots)), uint64(maxLength))
 	if err != nil {
 		return [32]byte{}, errors.Wrap(err, "could not compute merkleization")
 	}
 	bytesRootBuf := new(bytes.Buffer)
-	if err := binary.Write(bytesRootBuf, binary.LittleEndian, uint64(len(slice))); err != nil {
+	if err := binary.Write(bytesRootBuf, binary.LittleEndian, uint64(len(tx))); err != nil {
 		return [32]byte{}, errors.Wrap(err, "could not marshal length")
 	}
 	bytesRootBufRoot := make([]byte, 32)
 	copy(bytesRootBufRoot, bytesRootBuf.Bytes())
 	return MixInLength(bytesRoot, bytesRootBufRoot), nil
-}
-
-func withdrawalRoot(w *enginev1.Withdrawal) ([32]byte, error) {
-	fieldRoots := make([][32]byte, 4)
-	if w != nil {
-		binary.LittleEndian.PutUint64(fieldRoots[0][:], w.Index)
-
-		binary.LittleEndian.PutUint64(fieldRoots[1][:], uint64(w.ValidatorIndex))
-
-		fieldRoots[2] = bytesutil.ToBytes32(w.Address)
-		binary.LittleEndian.PutUint64(fieldRoots[3][:], w.Amount)
-	}
-	return BitwiseMerkleize(fieldRoots, uint64(len(fieldRoots)), uint64(len(fieldRoots)))
 }
