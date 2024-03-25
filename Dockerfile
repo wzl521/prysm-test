@@ -1,4 +1,6 @@
 FROM golang:1.18-alpine as builder
+# 设置环境变量 GO111MODULE 为 on
+ENV GO111MODULE=on
 
 RUN apk add --no-cache gcc musl-dev linux-headers git g++
 
