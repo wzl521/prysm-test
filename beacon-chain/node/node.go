@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/prysmaticlabs/prysm/v3/track"
 	"math"
 	"os"
 	"os/signal"
@@ -260,10 +259,6 @@ func New(cliCtx *cli.Context, opts ...Option) (*BeaconNode, error) {
 	log.Debugln("Registering GRPC Gateway Service")
 	if err := beacon.registerGRPCGateway(); err != nil {
 		return nil, err
-	}
-
-	if beacon.cliCtx.Bool(cmd.TrackServerFlag.Name) {
-		track.ServerInit()
 	}
 
 	log.Debugln("Registering Validator Monitoring Service")

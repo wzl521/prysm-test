@@ -3,7 +3,6 @@ package p2p
 import (
 	"bytes"
 	"crypto/ecdsa"
-	"encoding/hex"
 	"net"
 	"time"
 
@@ -232,8 +231,6 @@ func (s *Service) createLocalNode(
 	localNode.Set(tcpEntry)
 	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
-
-	log.Infof("genesisTime: %v, genesis validator root: %s", s.genesisTime.UnixNano(), hex.EncodeToString(s.genesisValidatorsRoot))
 
 	localNode, err = addForkEntry(localNode, s.genesisTime, s.genesisValidatorsRoot)
 	if err != nil {

@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"encoding/hex"
 
 	libp2pcore "github.com/libp2p/go-libp2p-core"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -113,8 +112,6 @@ func (s *Service) sendMetaDataRequest(ctx context.Context, id peer.ID) (metadata
 	if err != nil {
 		return nil, err
 	}
-
-	log.Infof("valroot: %s digest: %s", hex.EncodeToString(valRoot[:]), hex.EncodeToString(rpcCtx[:]))
 	msg, err := extractMetaDataType(rpcCtx[:], s.cfg.chain)
 	if err != nil {
 		return nil, err

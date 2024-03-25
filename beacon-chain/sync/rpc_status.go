@@ -3,7 +3,6 @@ package sync
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"fmt"
 	"sync"
 	"time"
@@ -141,9 +140,6 @@ func (s *Service) sendRPCStatusRequest(ctx context.Context, id peer.ID) error {
 		HeadRoot:       headRoot,
 		HeadSlot:       s.cfg.chain.HeadSlot(),
 	}
-	log.Infof("sent status: (fg: %s, fr: %s, hr: %s, fe: %d, hs: %d) to %s",
-		hex.EncodeToString(resp.ForkDigest), hex.EncodeToString(resp.FinalizedRoot), hex.EncodeToString(resp.HeadRoot),
-		resp.FinalizedEpoch, resp.HeadSlot, id.String())
 	topic, err := p2p.TopicFromMessage(p2p.StatusMessageName, slots.ToEpoch(s.cfg.chain.CurrentSlot()))
 	if err != nil {
 		return err
@@ -169,8 +165,6 @@ func (s *Service) sendRPCStatusRequest(ctx context.Context, id peer.ID) error {
 		s.cfg.p2p.Peers().Scorers().BadResponsesScorer().Increment(stream.Conn().RemotePeer())
 		return err
 	}
-	log.Infof("get response status: (fg: %s, fr: %s, hr: %s, fe: %d, hs: %d) to %s", hex.EncodeToString(msg.ForkDigest), hex.EncodeToString(msg.FinalizedRoot), hex.EncodeToString(msg.HeadRoot),
-		msg.FinalizedEpoch, msg.HeadSlot, id.String())
 
 	// If validation fails, validation error is logged, and peer status scorer will mark peer as bad.
 	err = s.validateStatusMessage(ctx, msg)
@@ -210,7 +204,6 @@ func (s *Service) statusRPCHandler(ctx context.Context, msg interface{}, stream 
 	s.rateLimiter.add(stream, 1)
 
 	remotePeer := stream.Conn().RemotePeer()
-	log.Infof("receive status %s from %s", m.String(), stream.Conn().RemoteMultiaddr().String())
 	if err := s.validateStatusMessage(ctx, m); err != nil {
 		log.WithFields(logrus.Fields{
 			"peer":  remotePeer,

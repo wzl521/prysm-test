@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"fmt"
-	"github.com/prysmaticlabs/prysm/v3/track"
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -35,18 +34,15 @@ var (
 // validateBeaconBlockPubSub checks that the incoming block has a valid BLS signature.
 // Blocks that have already been seen are ignored. If the BLS signature is any valid signature,
 // this method rebroadcasts the message.
-// 信标区块广播验证
 func (s *Service) validateBeaconBlockPubSub(ctx context.Context, pid peer.ID, msg *pubsub.Message) (pubsub.ValidationResult, error) {
 	receivedTime := prysmTime.Now()
 	// Validation runs on publish (not just subscriptions), so we should approve any message from
 	// ourselves.
-	// 信标区块广播验证
 	if pid == s.cfg.p2p.PeerID() {
 		return pubsub.ValidationAccept, nil
 	}
 
 	// We should not attempt to process blocks until fully synced, but propagation is OK.
-	// 如果在同步，忽略验证
 	if s.cfg.initialSync.Syncing() {
 		return pubsub.ValidationIgnore, nil
 	}
@@ -72,19 +68,8 @@ func (s *Service) validateBeaconBlockPubSub(ctx context.Context, pid peer.ID, ms
 		return pubsub.ValidationReject, errors.New("block.Block is nil")
 	}
 
-	track.EmitTrack(track.BeaconBlockBroadcast, time.Now().UnixMilli(), track.BeaconBlock{
-		Slot:      uint64(blk.Block().Slot()),
-		Graffiti:  blk.Block().Body().Graffiti(),
-		BlockHash: blk.Block().Body().Eth1Data().BlockHash,
-		Proposer:  uint64(blk.Block().ProposerIndex()),
-		FromPeer:  pid.String(),
-	})
-
-	log.WithField("blk", "propagation").Infof("slot: %d from : %v", blk.Block().Slot(), pid.String())
-
 	// Broadcast the block on a feed to notify other services in the beacon node
 	// of a received block (even if it does not process correctly through a state transition).
-	// 把信标区块广播出去
 	s.cfg.blockNotifier.BlockFeed().Send(&feed.Event{
 		Type: blockfeed.ReceivedBlock,
 		Data: &blockfeed.ReceivedBlockData{
