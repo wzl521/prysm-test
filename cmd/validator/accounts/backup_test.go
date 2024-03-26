@@ -12,16 +12,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	"github.com/prysmaticlabs/prysm/v3/io/file"
-	"github.com/prysmaticlabs/prysm/v3/testing/assert"
-	"github.com/prysmaticlabs/prysm/v3/testing/require"
-	"github.com/prysmaticlabs/prysm/v3/validator/accounts"
-	"github.com/prysmaticlabs/prysm/v3/validator/accounts/iface"
-	"github.com/prysmaticlabs/prysm/v3/validator/accounts/wallet"
-	"github.com/prysmaticlabs/prysm/v3/validator/keymanager"
-	"github.com/prysmaticlabs/prysm/v3/validator/keymanager/derived"
-	constant "github.com/prysmaticlabs/prysm/v3/validator/testing"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/io/file"
+	"github.com/prysmaticlabs/prysm/v5/testing/assert"
+	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v5/validator/accounts"
+	"github.com/prysmaticlabs/prysm/v5/validator/accounts/iface"
+	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
+	"github.com/prysmaticlabs/prysm/v5/validator/keymanager/derived"
+	constant "github.com/prysmaticlabs/prysm/v5/validator/testing"
 )
 
 func TestBackupAccounts_Noninteractive_Derived(t *testing.T) {
@@ -53,13 +52,14 @@ func TestBackupAccounts_Noninteractive_Derived(t *testing.T) {
 		backupPasswordFile: backupPasswordFile,
 		backupDir:          backupDir,
 	})
-	w, err := accounts.CreateWalletWithKeymanager(cliCtx.Context, &accounts.CreateWalletConfig{
-		WalletCfg: &wallet.Config{
-			WalletDir:      walletDir,
-			KeymanagerKind: keymanager.Derived,
-			WalletPassword: password,
-		},
-	})
+	opts := []accounts.Option{
+		accounts.WithWalletDir(walletDir),
+		accounts.WithKeymanagerType(keymanager.Derived),
+		accounts.WithWalletPassword(password),
+	}
+	acc, err := accounts.NewCLIManager(opts...)
+	require.NoError(t, err)
+	w, err := acc.WalletCreate(cliCtx.Context)
 	require.NoError(t, err)
 
 	km, err := w.InitializeKeymanager(cliCtx.Context, iface.InitKeymanagerConfig{ListenForChanges: false})
@@ -67,7 +67,7 @@ func TestBackupAccounts_Noninteractive_Derived(t *testing.T) {
 	// Create 2 accounts
 	derivedKM, ok := km.(*derived.Keymanager)
 	require.Equal(t, true, ok)
-	err = derivedKM.RecoverAccountsFromMnemonic(cliCtx.Context, constant.TestMnemonic, "", 2)
+	err = derivedKM.RecoverAccountsFromMnemonic(cliCtx.Context, constant.TestMnemonic, derived.DefaultMnemonicLanguage, "", 2)
 	require.NoError(t, err)
 
 	// Obtain the public keys of the accounts we created
@@ -98,7 +98,7 @@ func TestBackupAccounts_Noninteractive_Derived(t *testing.T) {
 
 	// We check a backup.zip file was created at the output path.
 	zipFilePath := filepath.Join(backupDir, accounts.ArchiveFilename)
-	assert.DeepEqual(t, true, file.FileExists(zipFilePath))
+	assert.DeepEqual(t, true, file.Exists(zipFilePath))
 
 	// We attempt to unzip the file and verify the keystores do match our accounts.
 	f, err := os.Open(zipFilePath)
@@ -170,13 +170,14 @@ func TestBackupAccounts_Noninteractive_Imported(t *testing.T) {
 		backupPasswordFile: backupPasswordFile,
 		backupDir:          backupDir,
 	})
-	_, err = accounts.CreateWalletWithKeymanager(cliCtx.Context, &accounts.CreateWalletConfig{
-		WalletCfg: &wallet.Config{
-			WalletDir:      walletDir,
-			KeymanagerKind: keymanager.Local,
-			WalletPassword: password,
-		},
-	})
+	opts := []accounts.Option{
+		accounts.WithWalletDir(walletDir),
+		accounts.WithKeymanagerType(keymanager.Local),
+		accounts.WithWalletPassword(password),
+	}
+	acc, err := accounts.NewCLIManager(opts...)
+	require.NoError(t, err)
+	_, err = acc.WalletCreate(cliCtx.Context)
 	require.NoError(t, err)
 
 	// We attempt to import accounts we wrote to the keys directory
@@ -188,7 +189,7 @@ func TestBackupAccounts_Noninteractive_Imported(t *testing.T) {
 
 	// We check a backup.zip file was created at the output path.
 	zipFilePath := filepath.Join(backupDir, accounts.ArchiveFilename)
-	assert.DeepEqual(t, true, file.FileExists(zipFilePath))
+	assert.DeepEqual(t, true, file.Exists(zipFilePath))
 
 	// We attempt to unzip the file and verify the keystores do match our accounts.
 	f, err := os.Open(zipFilePath)

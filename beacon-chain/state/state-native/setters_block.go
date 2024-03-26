@@ -1,13 +1,13 @@
 package state_native
 
 import (
-	"fmt"
-
-	customtypes "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/state-native/custom-types"
-	nativetypes "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/state-native/types"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stateutil"
-	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/pkg/errors"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native/types"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stateutil"
+	"github.com/prysmaticlabs/prysm/v5/config/features"
+	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
+	consensus_types "github.com/prysmaticlabs/prysm/v5/consensus-types"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 )
 
 // SetLatestBlockHeader in the beacon state.
@@ -16,7 +16,7 @@ func (b *BeaconState) SetLatestBlockHeader(val *ethpb.BeaconBlockHeader) error {
 	defer b.lock.Unlock()
 
 	b.latestBlockHeader = ethpb.CopyBeaconBlockHeader(val)
-	b.markFieldAsDirty(nativetypes.LatestBlockHeader)
+	b.markFieldAsDirty(types.LatestBlockHeader)
 	return nil
 }
 
@@ -26,43 +26,55 @@ func (b *BeaconState) SetBlockRoots(val [][]byte) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	b.sharedFieldReferences[nativetypes.BlockRoots].MinusRef()
-	b.sharedFieldReferences[nativetypes.BlockRoots] = stateutil.NewRef(1)
+	if features.Get().EnableExperimentalState {
+		if b.blockRootsMultiValue != nil {
+			b.blockRootsMultiValue.Detach(b)
+		}
+		b.blockRootsMultiValue = NewMultiValueBlockRoots(val)
+	} else {
+		b.sharedFieldReferences[types.BlockRoots].MinusRef()
+		b.sharedFieldReferences[types.BlockRoots] = stateutil.NewRef(1)
 
-	var rootsArr [fieldparams.BlockRootsLength][32]byte
-	for i := 0; i < len(rootsArr); i++ {
-		copy(rootsArr[i][:], val[i])
+		rootsArr := make([][32]byte, fieldparams.BlockRootsLength)
+		for i := 0; i < len(rootsArr); i++ {
+			copy(rootsArr[i][:], val[i])
+		}
+		b.blockRoots = rootsArr
 	}
-	roots := customtypes.BlockRoots(rootsArr)
-	b.blockRoots = &roots
-	b.markFieldAsDirty(nativetypes.BlockRoots)
-	b.rebuildTrie[nativetypes.BlockRoots] = true
+
+	b.markFieldAsDirty(types.BlockRoots)
+	b.rebuildTrie[types.BlockRoots] = true
 	return nil
 }
 
 // UpdateBlockRootAtIndex for the beacon state. Updates the block root
 // at a specific index to a new value.
 func (b *BeaconState) UpdateBlockRootAtIndex(idx uint64, blockRoot [32]byte) error {
-	if uint64(len(b.blockRoots)) <= idx {
-		return fmt.Errorf("invalid index provided %d", idx)
-	}
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	r := b.blockRoots
-	if ref := b.sharedFieldReferences[nativetypes.BlockRoots]; ref.Refs() > 1 {
-		// Copy elements in underlying array by reference.
-		roots := *b.blockRoots
-		rootsCopy := roots
-		r = &rootsCopy
-		ref.MinusRef()
-		b.sharedFieldReferences[nativetypes.BlockRoots] = stateutil.NewRef(1)
+	if features.Get().EnableExperimentalState {
+		if err := b.blockRootsMultiValue.UpdateAt(b, idx, blockRoot); err != nil {
+			return errors.Wrap(err, "could not update block roots")
+		}
+	} else {
+		if uint64(len(b.blockRoots)) <= idx {
+			return errors.Wrapf(consensus_types.ErrOutOfBounds, "block root index %d does not exist", idx)
+		}
+
+		r := b.blockRoots
+		if ref := b.sharedFieldReferences[types.BlockRoots]; ref.Refs() > 1 {
+			// Copy elements in underlying array by reference.
+			r = make([][32]byte, len(b.blockRoots))
+			copy(r, b.blockRoots)
+			ref.MinusRef()
+			b.sharedFieldReferences[types.BlockRoots] = stateutil.NewRef(1)
+		}
+		r[idx] = blockRoot
+		b.blockRoots = r
 	}
 
-	r[idx] = blockRoot
-	b.blockRoots = r
-
-	b.markFieldAsDirty(nativetypes.BlockRoots)
-	b.addDirtyIndices(nativetypes.BlockRoots, []uint64{idx})
+	b.markFieldAsDirty(types.BlockRoots)
+	b.addDirtyIndices(types.BlockRoots, []uint64{idx})
 	return nil
 }

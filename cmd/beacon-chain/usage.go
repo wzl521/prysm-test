@@ -5,12 +5,14 @@ import (
 	"io"
 	"sort"
 
-	"github.com/prysmaticlabs/prysm/v3/cmd"
-	"github.com/prysmaticlabs/prysm/v3/cmd/beacon-chain/flags"
-	"github.com/prysmaticlabs/prysm/v3/cmd/beacon-chain/sync/checkpoint"
-	"github.com/prysmaticlabs/prysm/v3/cmd/beacon-chain/sync/genesis"
-	"github.com/prysmaticlabs/prysm/v3/config/features"
-	"github.com/prysmaticlabs/prysm/v3/runtime/debug"
+	"github.com/prysmaticlabs/prysm/v5/cmd"
+	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/flags"
+	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/storage"
+	backfill "github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/sync/backfill/flags"
+	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/sync/checkpoint"
+	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/sync/genesis"
+	"github.com/prysmaticlabs/prysm/v5/config/features"
+	"github.com/prysmaticlabs/prysm/v5/runtime/debug"
 	"github.com/urfave/cli/v2"
 )
 
@@ -61,7 +63,6 @@ var appHelpFlagGroups = []flagGroup{
 			cmd.TracingEndpointFlag,
 			cmd.TraceSampleFractionFlag,
 			cmd.MonitoringHostFlag,
-			cmd.BackupWebhookOutputDir,
 			flags.MonitoringPortFlag,
 			cmd.DisableMonitoringFlag,
 			cmd.MaxGoroutines,
@@ -94,7 +95,6 @@ var appHelpFlagGroups = []flagGroup{
 		Name: "beacon-chain",
 		Flags: []cli.Flag{
 			flags.InteropMockEth1DataVotesFlag,
-			flags.InteropGenesisStateFlag,
 			flags.DepositContractFlag,
 			flags.ContractDeploymentBlock,
 			flags.RPCHost,
@@ -108,12 +108,13 @@ var appHelpFlagGroups = []flagGroup{
 			flags.GPRCGatewayCorsDomain,
 			flags.ExecutionEngineEndpoint,
 			flags.ExecutionEngineHeaders,
-			flags.HTTPWeb3ProviderFlag,
 			flags.ExecutionJWTSecretFlag,
 			flags.SetGCPercent,
 			flags.SlotsPerArchivedPoint,
 			flags.BlockBatchLimit,
 			flags.BlockBatchLimitBurstFactor,
+			flags.BlobBatchLimit,
+			flags.BlobBatchLimitBurstFactor,
 			flags.EnableDebugRPCEndpoints,
 			flags.SubscribeToAllSubnets,
 			flags.HistoricalSlasherNode,
@@ -125,11 +126,20 @@ var appHelpFlagGroups = []flagGroup{
 			flags.MevRelayEndpoint,
 			flags.MaxBuilderEpochMissedSlots,
 			flags.MaxBuilderConsecutiveMissedSlots,
+			flags.EngineEndpointTimeoutSeconds,
+			flags.SlasherDirFlag,
+			flags.LocalBlockValueBoost,
+			flags.JwtId,
 			checkpoint.BlockPath,
 			checkpoint.StatePath,
 			checkpoint.RemoteURL,
 			genesis.StatePath,
 			genesis.BeaconAPIURL,
+			storage.BlobStoragePathFlag,
+			storage.BlobRetentionEpochFlag,
+			backfill.EnableExperimentalBackfill,
+			backfill.BackfillWorkerCount,
+			backfill.BackfillBatchSize,
 		},
 	},
 	{
@@ -149,9 +159,11 @@ var appHelpFlagGroups = []flagGroup{
 			cmd.P2PHostDNS,
 			cmd.P2PMaxPeers,
 			cmd.P2PPrivKey,
+			cmd.P2PStaticID,
 			cmd.P2PMetadata,
 			cmd.P2PAllowList,
 			cmd.P2PDenyList,
+			cmd.PubsubQueueSize,
 			cmd.StaticPeers,
 			cmd.EnableUPnPFlag,
 			flags.MinSyncPeers,
@@ -171,9 +183,15 @@ var appHelpFlagGroups = []flagGroup{
 	{
 		Name: "interop",
 		Flags: []cli.Flag{
-			flags.InteropGenesisStateFlag,
+			genesis.StatePath,
 			flags.InteropGenesisTimeFlag,
 			flags.InteropNumValidatorsFlag,
+		},
+	},
+	{
+		Name: "deprecated",
+		Flags: []cli.Flag{
+			cmd.BackupWebhookOutputDir,
 		},
 	},
 }

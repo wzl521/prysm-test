@@ -4,13 +4,14 @@ import (
 	"strconv"
 	"testing"
 
-	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/eth/v1"
-	"github.com/prysmaticlabs/prysm/v3/proto/migration"
-	"github.com/prysmaticlabs/prysm/v3/testing/assert"
-	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/validator"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/eth/v1"
+	"github.com/prysmaticlabs/prysm/v5/proto/migration"
+	"github.com/prysmaticlabs/prysm/v5/testing/assert"
+	"github.com/prysmaticlabs/prysm/v5/testing/require"
 )
 
 func Test_ValidatorStatus(t *testing.T) {
@@ -18,12 +19,12 @@ func Test_ValidatorStatus(t *testing.T) {
 
 	type args struct {
 		validator *ethpb.Validator
-		epoch     types.Epoch
+		epoch     primitives.Epoch
 	}
 	tests := []struct {
 		name    string
 		args    args
-		want    ethpb.ValidatorStatus
+		want    validator.Status
 		wantErr bool
 	}{
 		{
@@ -33,9 +34,9 @@ func Test_ValidatorStatus(t *testing.T) {
 					ActivationEpoch:            farFutureEpoch,
 					ActivationEligibilityEpoch: farFutureEpoch,
 				},
-				epoch: types.Epoch(5),
+				epoch: primitives.Epoch(5),
 			},
-			want: ethpb.ValidatorStatus_PENDING,
+			want: validator.Pending,
 		},
 		{
 			name: "pending queued",
@@ -44,9 +45,9 @@ func Test_ValidatorStatus(t *testing.T) {
 					ActivationEpoch:            10,
 					ActivationEligibilityEpoch: 2,
 				},
-				epoch: types.Epoch(5),
+				epoch: primitives.Epoch(5),
 			},
-			want: ethpb.ValidatorStatus_PENDING,
+			want: validator.Pending,
 		},
 		{
 			name: "active ongoing",
@@ -55,9 +56,9 @@ func Test_ValidatorStatus(t *testing.T) {
 					ActivationEpoch: 3,
 					ExitEpoch:       farFutureEpoch,
 				},
-				epoch: types.Epoch(5),
+				epoch: primitives.Epoch(5),
 			},
-			want: ethpb.ValidatorStatus_ACTIVE,
+			want: validator.Active,
 		},
 		{
 			name: "active slashed",
@@ -67,9 +68,9 @@ func Test_ValidatorStatus(t *testing.T) {
 					ExitEpoch:       30,
 					Slashed:         true,
 				},
-				epoch: types.Epoch(5),
+				epoch: primitives.Epoch(5),
 			},
-			want: ethpb.ValidatorStatus_ACTIVE,
+			want: validator.Active,
 		},
 		{
 			name: "active exiting",
@@ -79,9 +80,9 @@ func Test_ValidatorStatus(t *testing.T) {
 					ExitEpoch:       30,
 					Slashed:         false,
 				},
-				epoch: types.Epoch(5),
+				epoch: primitives.Epoch(5),
 			},
-			want: ethpb.ValidatorStatus_ACTIVE,
+			want: validator.Active,
 		},
 		{
 			name: "exited slashed",
@@ -92,9 +93,9 @@ func Test_ValidatorStatus(t *testing.T) {
 					WithdrawableEpoch: 40,
 					Slashed:           true,
 				},
-				epoch: types.Epoch(35),
+				epoch: primitives.Epoch(35),
 			},
-			want: ethpb.ValidatorStatus_EXITED,
+			want: validator.Exited,
 		},
 		{
 			name: "exited unslashed",
@@ -105,9 +106,9 @@ func Test_ValidatorStatus(t *testing.T) {
 					WithdrawableEpoch: 40,
 					Slashed:           false,
 				},
-				epoch: types.Epoch(35),
+				epoch: primitives.Epoch(35),
 			},
-			want: ethpb.ValidatorStatus_EXITED,
+			want: validator.Exited,
 		},
 		{
 			name: "withdrawal possible",
@@ -119,9 +120,9 @@ func Test_ValidatorStatus(t *testing.T) {
 					EffectiveBalance:  params.BeaconConfig().MaxEffectiveBalance,
 					Slashed:           false,
 				},
-				epoch: types.Epoch(45),
+				epoch: primitives.Epoch(45),
 			},
-			want: ethpb.ValidatorStatus_WITHDRAWAL,
+			want: validator.Withdrawal,
 		},
 		{
 			name: "withdrawal done",
@@ -133,14 +134,14 @@ func Test_ValidatorStatus(t *testing.T) {
 					EffectiveBalance:  0,
 					Slashed:           false,
 				},
-				epoch: types.Epoch(45),
+				epoch: primitives.Epoch(45),
 			},
-			want: ethpb.ValidatorStatus_WITHDRAWAL,
+			want: validator.Withdrawal,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			readOnlyVal, err := v1.NewValidator(migration.V1ValidatorToV1Alpha1(tt.args.validator))
+			readOnlyVal, err := state_native.NewValidator(migration.V1ValidatorToV1Alpha1(tt.args.validator))
 			require.NoError(t, err)
 			got, err := ValidatorStatus(readOnlyVal, tt.args.epoch)
 			require.NoError(t, err)
@@ -156,12 +157,12 @@ func Test_ValidatorSubStatus(t *testing.T) {
 
 	type args struct {
 		validator *ethpb.Validator
-		epoch     types.Epoch
+		epoch     primitives.Epoch
 	}
 	tests := []struct {
 		name    string
 		args    args
-		want    ethpb.ValidatorStatus
+		want    validator.Status
 		wantErr bool
 	}{
 		{
@@ -171,9 +172,9 @@ func Test_ValidatorSubStatus(t *testing.T) {
 					ActivationEpoch:            farFutureEpoch,
 					ActivationEligibilityEpoch: farFutureEpoch,
 				},
-				epoch: types.Epoch(5),
+				epoch: primitives.Epoch(5),
 			},
-			want: ethpb.ValidatorStatus_PENDING_INITIALIZED,
+			want: validator.PendingInitialized,
 		},
 		{
 			name: "pending queued",
@@ -182,9 +183,9 @@ func Test_ValidatorSubStatus(t *testing.T) {
 					ActivationEpoch:            10,
 					ActivationEligibilityEpoch: 2,
 				},
-				epoch: types.Epoch(5),
+				epoch: primitives.Epoch(5),
 			},
-			want: ethpb.ValidatorStatus_PENDING_QUEUED,
+			want: validator.PendingQueued,
 		},
 		{
 			name: "active ongoing",
@@ -193,9 +194,9 @@ func Test_ValidatorSubStatus(t *testing.T) {
 					ActivationEpoch: 3,
 					ExitEpoch:       farFutureEpoch,
 				},
-				epoch: types.Epoch(5),
+				epoch: primitives.Epoch(5),
 			},
-			want: ethpb.ValidatorStatus_ACTIVE_ONGOING,
+			want: validator.ActiveOngoing,
 		},
 		{
 			name: "active slashed",
@@ -205,9 +206,9 @@ func Test_ValidatorSubStatus(t *testing.T) {
 					ExitEpoch:       30,
 					Slashed:         true,
 				},
-				epoch: types.Epoch(5),
+				epoch: primitives.Epoch(5),
 			},
-			want: ethpb.ValidatorStatus_ACTIVE_SLASHED,
+			want: validator.ActiveSlashed,
 		},
 		{
 			name: "active exiting",
@@ -217,9 +218,9 @@ func Test_ValidatorSubStatus(t *testing.T) {
 					ExitEpoch:       30,
 					Slashed:         false,
 				},
-				epoch: types.Epoch(5),
+				epoch: primitives.Epoch(5),
 			},
-			want: ethpb.ValidatorStatus_ACTIVE_EXITING,
+			want: validator.ActiveExiting,
 		},
 		{
 			name: "exited slashed",
@@ -230,9 +231,9 @@ func Test_ValidatorSubStatus(t *testing.T) {
 					WithdrawableEpoch: 40,
 					Slashed:           true,
 				},
-				epoch: types.Epoch(35),
+				epoch: primitives.Epoch(35),
 			},
-			want: ethpb.ValidatorStatus_EXITED_SLASHED,
+			want: validator.ExitedSlashed,
 		},
 		{
 			name: "exited unslashed",
@@ -243,9 +244,9 @@ func Test_ValidatorSubStatus(t *testing.T) {
 					WithdrawableEpoch: 40,
 					Slashed:           false,
 				},
-				epoch: types.Epoch(35),
+				epoch: primitives.Epoch(35),
 			},
-			want: ethpb.ValidatorStatus_EXITED_UNSLASHED,
+			want: validator.ExitedUnslashed,
 		},
 		{
 			name: "withdrawal possible",
@@ -257,9 +258,9 @@ func Test_ValidatorSubStatus(t *testing.T) {
 					EffectiveBalance:  params.BeaconConfig().MaxEffectiveBalance,
 					Slashed:           false,
 				},
-				epoch: types.Epoch(45),
+				epoch: primitives.Epoch(45),
 			},
-			want: ethpb.ValidatorStatus_WITHDRAWAL_POSSIBLE,
+			want: validator.WithdrawalPossible,
 		},
 		{
 			name: "withdrawal done",
@@ -271,14 +272,14 @@ func Test_ValidatorSubStatus(t *testing.T) {
 					EffectiveBalance:  0,
 					Slashed:           false,
 				},
-				epoch: types.Epoch(45),
+				epoch: primitives.Epoch(45),
 			},
-			want: ethpb.ValidatorStatus_WITHDRAWAL_DONE,
+			want: validator.WithdrawalDone,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			readOnlyVal, err := v1.NewValidator(migration.V1ValidatorToV1Alpha1(tt.args.validator))
+			readOnlyVal, err := state_native.NewValidator(migration.V1ValidatorToV1Alpha1(tt.args.validator))
 			require.NoError(t, err)
 			got, err := ValidatorSubStatus(readOnlyVal, tt.args.epoch)
 			require.NoError(t, err)

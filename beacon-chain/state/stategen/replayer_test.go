@@ -4,30 +4,44 @@ import (
 	"context"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	logTest "github.com/sirupsen/logrus/hooks/test"
 )
 
-func headerFromBlock(b interfaces.SignedBeaconBlock) (*ethpb.BeaconBlockHeader, error) {
+func headerFromBlock(b interfaces.ReadOnlySignedBeaconBlock) (*ethpb.BeaconBlockHeader, error) {
 	bodyRoot, err := b.Block().Body().HashTreeRoot()
 	if err != nil {
 		return nil, err
 	}
+	stateRoot := b.Block().StateRoot()
+	parentRoot := b.Block().ParentRoot()
 	return &ethpb.BeaconBlockHeader{
 		Slot:          b.Block().Slot(),
-		StateRoot:     b.Block().StateRoot(),
+		StateRoot:     stateRoot[:],
 		ProposerIndex: b.Block().ProposerIndex(),
 		BodyRoot:      bodyRoot[:],
-		ParentRoot:    b.Block().ParentRoot(),
+		ParentRoot:    parentRoot[:],
 	}, nil
+}
+
+func TestReplayBlocks_ZeroDiff(t *testing.T) {
+	logHook := logTest.NewGlobal()
+	ctx := context.Background()
+	specs := []mockHistorySpec{{slot: 0}}
+	hist := newMockHistory(t, specs, 0)
+	ch := NewCanonicalHistory(hist, hist, hist)
+	_, err := ch.ReplayerForSlot(0).ReplayBlocks(ctx)
+	require.NoError(t, err)
+	require.LogsDoNotContain(t, logHook, "Replaying canonical blocks from most recent state")
 }
 
 func TestReplayBlocks(t *testing.T) {
 	ctx := context.Background()
-	var zero, one, two, three, four, five types.Slot = 50, 51, 150, 151, 152, 200
+	var zero, one, two, three, four, five primitives.Slot = 50, 51, 150, 151, 152, 200
 	specs := []mockHistorySpec{
 		{slot: zero},
 		{slot: one, savedState: true},
@@ -76,7 +90,7 @@ func TestReplayBlocks(t *testing.T) {
 
 func TestReplayToSlot(t *testing.T) {
 	ctx := context.Background()
-	var zero, one, two, three, four, five types.Slot = 50, 51, 150, 151, 152, 200
+	var zero, one, two, three, four, five primitives.Slot = 50, 51, 150, 151, 152, 200
 	specs := []mockHistorySpec{
 		{slot: zero},
 		{slot: one, savedState: true},

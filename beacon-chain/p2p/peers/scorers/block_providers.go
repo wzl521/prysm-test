@@ -6,12 +6,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p/peers/peerdata"
-	"github.com/prysmaticlabs/prysm/v3/cmd/beacon-chain/flags"
-	"github.com/prysmaticlabs/prysm/v3/config/features"
-	"github.com/prysmaticlabs/prysm/v3/crypto/rand"
-	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers/peerdata"
+	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/flags"
+	"github.com/prysmaticlabs/prysm/v5/config/features"
+	"github.com/prysmaticlabs/prysm/v5/crypto/rand"
 )
 
 var _ Scorer = (*BlockProviderScorer)(nil)
@@ -155,7 +154,7 @@ func (s *BlockProviderScorer) touch(pid peer.ID, t ...time.Time) {
 	if len(t) == 1 {
 		peerData.BlockProviderUpdated = t[0]
 	} else {
-		peerData.BlockProviderUpdated = prysmTime.Now()
+		peerData.BlockProviderUpdated = time.Now()
 	}
 }
 

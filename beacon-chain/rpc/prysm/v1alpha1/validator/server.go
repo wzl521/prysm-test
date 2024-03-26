@@ -7,29 +7,32 @@ import (
 	"context"
 	"time"
 
-	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/blockchain"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/builder"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache/depositcache"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed"
-	blockfeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/block"
-	opfeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/operation"
-	statefeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/state"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/execution"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/attestations"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/slashings"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/synccommittee"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/voluntaryexits"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stategen"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/sync"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v3/network/forks"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/builder"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache/depositcache"
+	blockfeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/block"
+	opfeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/operation"
+	statefeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/state"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/execution"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/attestations"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/blstoexec"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/slashings"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/synccommittee"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/voluntaryexits"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/rpc/core"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stategen"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/sync"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v5/network/forks"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/runtime/version"
+	"github.com/prysmaticlabs/prysm/v5/time/slots"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -41,16 +44,16 @@ import (
 // and more.
 type Server struct {
 	Ctx                    context.Context
-	AttestationCache       *cache.AttestationCache
-	ProposerSlotIndexCache *cache.ProposerPayloadIDsCache
+	PayloadIDCache         *cache.PayloadIDCache
+	TrackedValidatorsCache *cache.TrackedValidatorsCache
 	HeadFetcher            blockchain.HeadFetcher
-	HeadUpdater            blockchain.HeadUpdater
 	ForkFetcher            blockchain.ForkFetcher
+	ForkchoiceFetcher      blockchain.ForkchoiceFetcher
 	GenesisFetcher         blockchain.GenesisFetcher
 	FinalizationFetcher    blockchain.FinalizationFetcher
 	TimeFetcher            blockchain.TimeFetcher
 	BlockFetcher           execution.POWBlockFetcher
-	DepositFetcher         depositcache.DepositFetcher
+	DepositFetcher         cache.DepositFetcher
 	ChainStartFetcher      execution.ChainStartFetcher
 	Eth1InfoFetcher        execution.ChainInfoFetcher
 	OptimisticModeFetcher  blockchain.OptimisticModeFetcher
@@ -63,6 +66,7 @@ type Server struct {
 	ExitPool               voluntaryexits.PoolManager
 	SyncCommitteePool      synccommittee.Pool
 	BlockReceiver          blockchain.BlockReceiver
+	BlobReceiver           blockchain.BlobReceiver
 	MockEth1Votes          bool
 	Eth1BlockFetcher       execution.POWBlockFetcher
 	PendingDepositsFetcher depositcache.PendingDepositsFetcher
@@ -72,6 +76,9 @@ type Server struct {
 	BeaconDB               db.HeadAccessDatabase
 	ExecutionEngineCaller  execution.EngineCaller
 	BlockBuilder           builder.BlockBuilder
+	BLSChangesPool         blstoexec.PoolManager
+	ClockWaiter            startup.ClockWaiter
+	CoreService            *core.Service
 }
 
 // WaitForActivation checks if a validator public key exists in the active validator registry of the current
@@ -119,7 +126,7 @@ func (vs *Server) WaitForActivation(req *ethpb.ValidatorActivationRequest, strea
 
 // ValidatorIndex is called by a validator to get its index location in the beacon state.
 func (vs *Server) ValidatorIndex(ctx context.Context, req *ethpb.ValidatorIndexRequest) (*ethpb.ValidatorIndexResponse, error) {
-	st, err := vs.HeadFetcher.HeadState(ctx)
+	st, err := vs.HeadFetcher.HeadStateReadOnly(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not determine head state: %v", err)
 	}
@@ -135,12 +142,26 @@ func (vs *Server) ValidatorIndex(ctx context.Context, req *ethpb.ValidatorIndexR
 }
 
 // DomainData fetches the current domain version information from the beacon state.
-func (vs *Server) DomainData(_ context.Context, request *ethpb.DomainRequest) (*ethpb.DomainResponse, error) {
+func (vs *Server) DomainData(ctx context.Context, request *ethpb.DomainRequest) (*ethpb.DomainResponse, error) {
 	fork, err := forks.Fork(request.Epoch)
 	if err != nil {
 		return nil, err
 	}
 	headGenesisValidatorsRoot := vs.HeadFetcher.HeadGenesisValidatorsRoot()
+	isExitDomain := [4]byte(request.Domain) == params.BeaconConfig().DomainVoluntaryExit
+	if isExitDomain {
+		hs, err := vs.HeadFetcher.HeadStateReadOnly(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if hs.Version() >= version.Deneb {
+			fork = &ethpb.Fork{
+				PreviousVersion: params.BeaconConfig().CapellaForkVersion,
+				CurrentVersion:  params.BeaconConfig().CapellaForkVersion,
+				Epoch:           params.BeaconConfig().CapellaForkEpoch,
+			}
+		}
+	}
 	dv, err := signing.Domain(fork, request.Epoch, bytesutil.ToBytes4(request.Domain), headGenesisValidatorsRoot[:])
 	if err != nil {
 		return nil, err
@@ -155,7 +176,7 @@ func (vs *Server) DomainData(_ context.Context, request *ethpb.DomainRequest) (*
 // subscribes to an event stream triggered by the powchain service whenever the ChainStart log does
 // occur in the Deposit Contract on ETH 1.0.
 func (vs *Server) WaitForChainStart(_ *emptypb.Empty, stream ethpb.BeaconNodeValidator_WaitForChainStartServer) error {
-	head, err := vs.HeadFetcher.HeadState(stream.Context())
+	head, err := vs.HeadFetcher.HeadStateReadOnly(stream.Context())
 	if err != nil {
 		return status.Errorf(codes.Internal, "Could not retrieve head state: %v", err)
 	}
@@ -168,30 +189,39 @@ func (vs *Server) WaitForChainStart(_ *emptypb.Empty, stream ethpb.BeaconNodeVal
 		return stream.Send(res)
 	}
 
-	stateChannel := make(chan *feed.Event, 1)
-	stateSub := vs.StateNotifier.StateFeed().Subscribe(stateChannel)
-	defer stateSub.Unsubscribe()
-	for {
-		select {
-		case event := <-stateChannel:
-			if event.Type == statefeed.Initialized {
-				data, ok := event.Data.(*statefeed.InitializedData)
-				if !ok {
-					return errors.New("event data is not type *statefeed.InitializedData")
-				}
-				log.WithField("starttime", data.StartTime).Debug("Received chain started event")
-				log.Debug("Sending genesis time notification to connected validator clients")
-				res := &ethpb.ChainStartResponse{
-					Started:               true,
-					GenesisTime:           uint64(data.StartTime.Unix()),
-					GenesisValidatorsRoot: data.GenesisValidatorsRoot,
-				}
-				return stream.Send(res)
-			}
-		case <-stateSub.Err():
-			return status.Error(codes.Aborted, "Subscriber closed, exiting goroutine")
-		case <-vs.Ctx.Done():
-			return status.Error(codes.Canceled, "Context canceled")
-		}
+	clock, err := vs.ClockWaiter.WaitForClock(vs.Ctx)
+	if err != nil {
+		return status.Error(codes.Canceled, "Context canceled")
 	}
+	log.WithField("starttime", clock.GenesisTime()).Debug("Received chain started event")
+	log.Debug("Sending genesis time notification to connected validator clients")
+	gvr := clock.GenesisValidatorsRoot()
+	res := &ethpb.ChainStartResponse{
+		Started:               true,
+		GenesisTime:           uint64(clock.GenesisTime().Unix()),
+		GenesisValidatorsRoot: gvr[:],
+	}
+	return stream.Send(res)
+}
+
+// PruneBlobsBundleCacheRoutine prunes the blobs bundle cache at 6s mark of the slot.
+func (vs *Server) PruneBlobsBundleCacheRoutine() {
+	go func() {
+		clock, err := vs.ClockWaiter.WaitForClock(vs.Ctx)
+		if err != nil {
+			log.WithError(err).Error("PruneBlobsBundleCacheRoutine failed to receive genesis data")
+			return
+		}
+
+		pruneInterval := time.Second * time.Duration(params.BeaconConfig().SecondsPerSlot/2)
+		ticker := slots.NewSlotTickerWithIntervals(clock.GenesisTime(), []time.Duration{pruneInterval})
+		for {
+			select {
+			case <-vs.Ctx.Done():
+				return
+			case slotInterval := <-ticker.C():
+				bundleCache.prune(slotInterval.Slot)
+			}
+		}
+	}()
 }

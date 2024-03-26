@@ -3,6 +3,7 @@ package kv
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,12 +11,12 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	prombolt "github.com/prysmaticlabs/prombbolt"
-	"github.com/prysmaticlabs/prysm/v3/async/abool"
-	"github.com/prysmaticlabs/prysm/v3/async/event"
-	"github.com/prysmaticlabs/prysm/v3/config/features"
-	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	"github.com/prysmaticlabs/prysm/v3/io/file"
+	"github.com/prysmaticlabs/prysm/v5/async/abool"
+	"github.com/prysmaticlabs/prysm/v5/async/event"
+	"github.com/prysmaticlabs/prysm/v5/config/features"
+	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/io/file"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -64,7 +65,7 @@ type Store struct {
 	db                                 *bolt.DB
 	databasePath                       string
 	batchedAttestations                *QueuedAttestationRecords
-	batchedAttestationsChan            chan *AttestationRecord
+	batchedAttestationsChan            chan *AttestationRecordSaveRequest
 	batchAttestationsFlushedFeed       *event.Feed
 	batchedAttestationsFlushInProgress abool.AtomicBool
 }
@@ -84,10 +85,12 @@ func (s *Store) view(fn func(*bolt.Tx) error) error {
 
 // ClearDB removes any previously stored data at the configured data directory.
 func (s *Store) ClearDB() error {
+	if err := s.Close(); err != nil {
+		return fmt.Errorf("failed to close db: %w", err)
+	}
 	if _, err := os.Stat(s.databasePath); os.IsNotExist(err) {
 		return nil
 	}
-	prometheus.Unregister(createBoltCollector(s.db))
 	return os.Remove(filepath.Join(s.databasePath, ProtectionDbFileName))
 }
 
@@ -134,7 +137,7 @@ func NewKVStore(ctx context.Context, dirPath string, config *Config) (*Store, er
 		db:                           boltDB,
 		databasePath:                 dirPath,
 		batchedAttestations:          NewQueuedAttestationRecords(),
-		batchedAttestationsChan:      make(chan *AttestationRecord, attestationBatchCapacity),
+		batchedAttestationsChan:      make(chan *AttestationRecordSaveRequest, attestationBatchCapacity),
 		batchAttestationsFlushedFeed: new(event.Feed),
 	}
 
@@ -152,6 +155,7 @@ func NewKVStore(ctx context.Context, dirPath string, config *Config) (*Store, er
 			pubKeysBucket,
 			migrationsBucket,
 			graffitiBucket,
+			proposerSettingsBucket,
 		)
 	}); err != nil {
 		return nil, err

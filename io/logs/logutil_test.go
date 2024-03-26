@@ -3,7 +3,7 @@ package logs
 import (
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v5/testing/require"
 )
 
 var urltests = []struct {

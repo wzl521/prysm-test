@@ -1,29 +1,21 @@
 package slasher
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
-	slashertypes "github.com/prysmaticlabs/prysm/v3/beacon-chain/slasher/types"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
+	slashertypes "github.com/prysmaticlabs/prysm/v5/beacon-chain/slasher/types"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/sirupsen/logrus"
 )
 
-// A struct encapsulating input arguments to
-// functions used for attester slashing detection and
-// loading, saving, and updating min/max span chunks.
-type chunkUpdateArgs struct {
-	kind                slashertypes.ChunkKind
-	chunkIndex          uint64
-	validatorChunkIndex uint64
-	currentEpoch        types.Epoch
-}
-
 // Chunker defines a struct which represents a slice containing a chunk for K different validator's
-// min spans used for surround vote detection in slasher. The interface defines methods used to check
+// min/max spans used for surround vote detection in slasher. The interface defines methods used to check
 // if an attestation is slashable for a validator index based on the contents of
 // the chunk as well as the ability to update the data in the chunk with incoming information.
 type Chunker interface {
@@ -32,17 +24,18 @@ type Chunker interface {
 	CheckSlashable(
 		ctx context.Context,
 		slasherDB db.SlasherDatabase,
-		validatorIdx types.ValidatorIndex,
+		validatorIdx primitives.ValidatorIndex,
 		attestation *slashertypes.IndexedAttestationWrapper,
 	) (*ethpb.AttesterSlashing, error)
 	Update(
-		args *chunkUpdateArgs,
-		validatorIndex types.ValidatorIndex,
+		chunkIndex uint64,
+		currentEpoch primitives.Epoch,
+		validatorIndex primitives.ValidatorIndex,
 		startEpoch,
-		newTargetEpoch types.Epoch,
+		newTargetEpoch primitives.Epoch,
 	) (keepGoing bool, err error)
-	StartEpoch(sourceEpoch, currentEpoch types.Epoch) (epoch types.Epoch, exists bool)
-	NextChunkStartEpoch(startEpoch types.Epoch) types.Epoch
+	StartEpoch(sourceEpoch, currentEpoch primitives.Epoch) (epoch primitives.Epoch, exists bool)
+	NextChunkStartEpoch(startEpoch primitives.Epoch) primitives.Epoch
 }
 
 // MinSpanChunksSlice represents a slice containing a chunk for K different validator's min spans.
@@ -53,32 +46,34 @@ type Chunker interface {
 // specified epoch and all attestation target epochs a validator has created
 // where att.source.epoch > e.
 //
+// nolint:dupword
+//
 // Under ideal network conditions, where every target epoch immediately follows its source,
 // min spans for a validator will look as follows:
 //
-//  min_spans = [2, 2, 2, ..., 2]
+//	min_spans = [2, 2, 2, ..., 2]
 //
 // Next, we can chunk this list of min spans into chunks of length C. For C = 2, for example:
 //
-//                       chunk0  chunk1       chunkN
-//                        {  }   {   }         {  }
-//  chunked_min_spans = [[2, 2], [2, 2], ..., [2, 2]]
+//	                     chunk0  chunk1       chunkN
+//	                      {  }   {   }         {  }
+//	chunked_min_spans = [[2, 2], [2, 2], ..., [2, 2]]
 //
 // Finally, we can store each chunk index for K validators into a single flat slice. For K = 3:
 //
-//                                     val0    val1    val2
-//                                     {  }    {  }    {  }
-//   chunk_0_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
+//	                                  val0    val1    val2
+//	                                  {  }    {  }    {  }
+//	chunk_0_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
 //
-//                                     val0    val1    val2
-//                                     {  }    {  }    {  }
-//   chunk_1_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
+//	                                  val0    val1    val2
+//	                                  {  }    {  }    {  }
+//	chunk_1_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
 //
-//                            ...
+//	                         ...
 //
-//                                     val0    val1    val2
-//                                     {  }    {  }    {  }
-//   chunk_N_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
+//	                                  val0    val1    val2
+//	                                  {  }    {  }    {  }
+//	chunk_N_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
 //
 // MinSpanChunksSlice represents the data structure above for a single chunk index.
 type MinSpanChunksSlice struct {
@@ -86,12 +81,16 @@ type MinSpanChunksSlice struct {
 	data   []uint16
 }
 
+var _ Chunker = (*MinSpanChunksSlice)(nil)
+
 // MaxSpanChunksSlice represents the same data structure as MinSpanChunksSlice however
 // keeps track of validator max spans for slashing detection instead.
 type MaxSpanChunksSlice struct {
 	params *Parameters
 	data   []uint16
 }
+
+var _ Chunker = (*MaxSpanChunksSlice)(nil)
 
 // EmptyMinSpanChunksSlice initializes a min span chunk of length C*K for
 // C = chunkSize and K = validatorChunkSize filled with neutral elements.
@@ -151,12 +150,12 @@ func MaxChunkSpansSliceFrom(params *Parameters, chunk []uint16) (*MaxSpanChunksS
 
 // NeutralElement for a min span chunks slice is undefined, in this case
 // using MaxUint16 as a sane value given it is impossible we reach it.
-func (_ *MinSpanChunksSlice) NeutralElement() uint16 {
+func (*MinSpanChunksSlice) NeutralElement() uint16 {
 	return math.MaxUint16
 }
 
 // NeutralElement for a max span chunks slice is 0.
-func (_ *MaxSpanChunksSlice) NeutralElement() uint16 {
+func (*MaxSpanChunksSlice) NeutralElement() uint16 {
 	return 0
 }
 
@@ -175,7 +174,7 @@ func (m *MaxSpanChunksSlice) Chunk() []uint16 {
 // within the min span chunks slice. Recall that for an incoming attestation, B, and an
 // existing attestation, A:
 //
-//  B surrounds A if and only if B.target > min_spans[B.source]
+//	B surrounds A if and only if B.target > min_spans[B.source]
 //
 // That is, this condition is sufficient to check if an incoming attestation
 // is surrounding a previous one. We also check if we indeed have an existing
@@ -184,37 +183,69 @@ func (m *MaxSpanChunksSlice) Chunk() []uint16 {
 func (m *MinSpanChunksSlice) CheckSlashable(
 	ctx context.Context,
 	slasherDB db.SlasherDatabase,
-	validatorIdx types.ValidatorIndex,
-	attestation *slashertypes.IndexedAttestationWrapper,
+	validatorIdx primitives.ValidatorIndex,
+	incomingAttWrapper *slashertypes.IndexedAttestationWrapper,
 ) (*ethpb.AttesterSlashing, error) {
-	sourceEpoch := attestation.IndexedAttestation.Data.Source.Epoch
-	targetEpoch := attestation.IndexedAttestation.Data.Target.Epoch
+	sourceEpoch := incomingAttWrapper.IndexedAttestation.Data.Source.Epoch
+	targetEpoch := incomingAttWrapper.IndexedAttestation.Data.Target.Epoch
+
 	minTarget, err := chunkDataAtEpoch(m.params, m.data, validatorIdx, sourceEpoch)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err, "could not get min target for validator %d at epoch %d", validatorIdx, sourceEpoch,
 		)
 	}
-	if targetEpoch > minTarget {
-		existingAttRecord, err := slasherDB.AttestationRecordForValidator(
-			ctx, validatorIdx, minTarget,
-		)
-		if err != nil {
-			return nil, errors.Wrapf(
-				err, "could not get existing attestation record at target %d", minTarget,
-			)
+
+	if targetEpoch <= minTarget {
+		// The incoming attestation does not surround any existing ones.
+		return nil, nil
+	}
+
+	// The incoming attestation surrounds an existing one.
+	existingAttWrapper, err := slasherDB.AttestationRecordForValidator(ctx, validatorIdx, minTarget)
+	if err != nil {
+		return nil, errors.Wrapf(err, "could not get existing attestation record at target %d", minTarget)
+	}
+
+	if existingAttWrapper == nil {
+		// This case should normally not happen. If this happen, it means we previously
+		// recorded in our min/max DB an distance corresponding to an attestaiton, but WITHOUT
+		// recording the attestation itself. As a consequence, we say there is no surrounding vote,
+		// but we log an error.
+		fields := logrus.Fields{
+			"validatorIndex": validatorIdx,
+			"targetEpoch":    minTarget,
 		}
-		if existingAttRecord != nil {
-			if sourceEpoch < existingAttRecord.IndexedAttestation.Data.Source.Epoch {
-				surroundingVotesTotal.Inc()
-				return &ethpb.AttesterSlashing{
-					Attestation_1: attestation.IndexedAttestation,
-					Attestation_2: existingAttRecord.IndexedAttestation,
-				}, nil
-			}
+
+		log.WithFields(fields).Error("No existing attestation record found while a surrounding vote was detected.")
+		return nil, nil
+	}
+
+	if existingAttWrapper.IndexedAttestation.Data.Source.Epoch <= sourceEpoch {
+		// This case should normally not happen, since if we have targetEpoch > minTarget,
+		// then there is at least one attestation we surround.
+		// However, it can happens if we have multiple attestation with the same target
+		// but with a different source. In this case, we have both a double vote AND a surround vote.
+		// The validator will be slashed for the double vote, and the surround vote will be ignored.
+		return nil, nil
+	}
+
+	surroundingVotesTotal.Inc()
+
+	slashing := &ethpb.AttesterSlashing{
+		Attestation_1: existingAttWrapper.IndexedAttestation,
+		Attestation_2: incomingAttWrapper.IndexedAttestation,
+	}
+
+	// Ensure the attestation with the lower data root is the first attestation.
+	if bytes.Compare(existingAttWrapper.DataRoot[:], incomingAttWrapper.DataRoot[:]) > 0 {
+		slashing = &ethpb.AttesterSlashing{
+			Attestation_1: incomingAttWrapper.IndexedAttestation,
+			Attestation_2: existingAttWrapper.IndexedAttestation,
 		}
 	}
-	return nil, nil
+
+	return slashing, nil
 }
 
 // CheckSlashable takes in a validator index and an incoming attestation
@@ -222,7 +253,7 @@ func (m *MinSpanChunksSlice) CheckSlashable(
 // within the max span chunks slice. Recall that for an incoming attestation, B, and an
 // existing attestation, A:
 //
-//  B surrounds A if and only if B.target < max_spans[B.source]
+//	B is surrounded by A if and only if B.target < max_spans[B.source]
 //
 // That is, this condition is sufficient to check if an incoming attestation
 // is surrounded by a previous one. We also check if we indeed have an existing
@@ -231,37 +262,69 @@ func (m *MinSpanChunksSlice) CheckSlashable(
 func (m *MaxSpanChunksSlice) CheckSlashable(
 	ctx context.Context,
 	slasherDB db.SlasherDatabase,
-	validatorIdx types.ValidatorIndex,
-	attestation *slashertypes.IndexedAttestationWrapper,
+	validatorIdx primitives.ValidatorIndex,
+	incomingAttWrapper *slashertypes.IndexedAttestationWrapper,
 ) (*ethpb.AttesterSlashing, error) {
-	sourceEpoch := attestation.IndexedAttestation.Data.Source.Epoch
-	targetEpoch := attestation.IndexedAttestation.Data.Target.Epoch
+	sourceEpoch := incomingAttWrapper.IndexedAttestation.Data.Source.Epoch
+	targetEpoch := incomingAttWrapper.IndexedAttestation.Data.Target.Epoch
+
 	maxTarget, err := chunkDataAtEpoch(m.params, m.data, validatorIdx, sourceEpoch)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err, "could not get max target for validator %d at epoch %d", validatorIdx, sourceEpoch,
 		)
 	}
-	if targetEpoch < maxTarget {
-		existingAttRecord, err := slasherDB.AttestationRecordForValidator(
-			ctx, validatorIdx, maxTarget,
-		)
-		if err != nil {
-			return nil, errors.Wrapf(
-				err, "could not get existing attestation record at target %d", maxTarget,
-			)
+
+	if targetEpoch >= maxTarget {
+		// The incoming attestation is not surrounded by any existing ones.
+		return nil, nil
+	}
+
+	// The incoming attestation is surrounded by an existing one.
+	existingAttWrapper, err := slasherDB.AttestationRecordForValidator(ctx, validatorIdx, maxTarget)
+	if err != nil {
+		return nil, errors.Wrapf(err, "could not get existing attestation record at target %d", maxTarget)
+	}
+
+	if existingAttWrapper == nil {
+		// This case should normally not happen. If this happen, it means we previously
+		// recorded in our min/max DB an distance corresponding to an attestaiton, but WITHOUT
+		// recording the attestation itself. As a consequence, we say there is no surrounded vote,
+		// but we log an error.
+		fields := logrus.Fields{
+			"validatorIndex": validatorIdx,
+			"targetEpoch":    maxTarget,
 		}
-		if existingAttRecord != nil {
-			if existingAttRecord.IndexedAttestation.Data.Source.Epoch < sourceEpoch {
-				surroundedVotesTotal.Inc()
-				return &ethpb.AttesterSlashing{
-					Attestation_1: existingAttRecord.IndexedAttestation,
-					Attestation_2: attestation.IndexedAttestation,
-				}, nil
-			}
+
+		log.WithFields(fields).Error("No existing attestation record found while a surrounded vote was detected.")
+		return nil, nil
+	}
+
+	if existingAttWrapper.IndexedAttestation.Data.Source.Epoch >= sourceEpoch {
+		// This case should normally not happen, since if we have targetEpoch < maxTarget,
+		// then there is at least one attestation that surrounds us.
+		// However, it can happens if we have multiple attestation with the same target
+		// but with a different source. In this case, we have both a double vote AND a surround vote.
+		// The validator will be slashed for the double vote, and the surround vote will be ignored.
+		return nil, nil
+	}
+
+	surroundedVotesTotal.Inc()
+
+	slashing := &ethpb.AttesterSlashing{
+		Attestation_1: existingAttWrapper.IndexedAttestation,
+		Attestation_2: incomingAttWrapper.IndexedAttestation,
+	}
+
+	// Ensure the attestation with the lower data root is the first attestation.
+	if bytes.Compare(existingAttWrapper.DataRoot[:], incomingAttWrapper.DataRoot[:]) > 0 {
+		slashing = &ethpb.AttesterSlashing{
+			Attestation_1: incomingAttWrapper.IndexedAttestation,
+			Attestation_2: existingAttWrapper.IndexedAttestation,
 		}
 	}
-	return nil, nil
+
+	return slashing, nil
 }
 
 // Update a min span chunk for a validator index starting at the current epoch, e_c, then updating
@@ -278,19 +341,19 @@ func (m *MaxSpanChunksSlice) CheckSlashable(
 // Recall that a MinSpanChunksSlice struct represents a single slice for a chunk index
 // from the collection below:
 //
-//                                     val0    val1    val2
-//                                     {  }    {  }    {  }
-//   chunk_0_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
+//	                                  val0    val1    val2
+//	                                  {  }    {  }    {  }
+//	chunk_0_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
 //
-//                                     val0    val1    val2
-//                                     {  }    {  }    {  }
-//   chunk_1_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
+//	                                  val0    val1    val2
+//	                                  {  }    {  }    {  }
+//	chunk_1_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
 //
-//                            ...
+//	                         ...
 //
-//                                     val0    val1    val2
-//                                     {  }    {  }    {  }
-//   chunk_N_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
+//	                                  val0    val1    val2
+//	                                  {  }    {  }    {  }
+//	chunk_N_for_validators_0_to_2 = [[2, 2], [2, 2], [2, 2]]
 //
 // Let's take a look at how this update will look for a real set of min span chunk:
 // For the purposes of a simple example, let's set H = 2, meaning a min span
@@ -301,12 +364,11 @@ func (m *MaxSpanChunksSlice) CheckSlashable(
 // 4 down to 3. First, we find out which chunk epoch 4 falls into, which is calculated as:
 // chunk_idx = (epoch % H) / C = (4 % 2) / 2 = 0
 //
-//
-//                                     val0    val1    val2
-//                                     {  }    {  }    {  }
-//   chunk_0_for_validators_0_to_3 = [[2, 2], [2, 2], [2, 2]]
-//                                     |
-//                                     |-> epoch 4 for validator 0
+//	                                  val0    val1    val2
+//	                                  {  }    {  }    {  }
+//	chunk_0_for_validators_0_to_3 = [[2, 2], [2, 2], [2, 2]]
+//	                                  |
+//	                                  |-> epoch 4 for validator 0
 //
 // Next up, we proceed with the update process for validator index 0, starting at epoch 4
 // all the way down to epoch 2. We will need to go down the array as far as we can get. If the
@@ -319,22 +381,23 @@ func (m *MaxSpanChunksSlice) CheckSlashable(
 // to update. In our example, we stop at 2, which is still part of chunk 0, so no need
 // to jump to another min span chunks slice to perform updates.
 func (m *MinSpanChunksSlice) Update(
-	args *chunkUpdateArgs,
-	validatorIndex types.ValidatorIndex,
+	chunkIndex uint64,
+	currentEpoch primitives.Epoch,
+	validatorIndex primitives.ValidatorIndex,
 	startEpoch,
-	newTargetEpoch types.Epoch,
+	newTargetEpoch primitives.Epoch,
 ) (keepGoing bool, err error) {
 	// The lowest epoch we need to update.
-	minEpoch := types.Epoch(0)
-	if args.currentEpoch > (m.params.historyLength - 1) {
-		minEpoch = args.currentEpoch - (m.params.historyLength - 1)
+	minEpoch := primitives.Epoch(0)
+	if currentEpoch > (m.params.historyLength - 1) {
+		minEpoch = currentEpoch - (m.params.historyLength - 1)
 	}
 	epochInChunk := startEpoch
-	// We go down the chunk for the validator, updating every value starting at start_epoch down to min_epoch.
-	// As long as the epoch, e, in the same chunk index and e >= min_epoch, we proceed with
+	// We go down the chunk for the validator, updating every value starting at startEpoch down to minEpoch.
+	// As long as the epoch, e, in the same chunk index and e >= minEpoch, we proceed with
 	// a for loop.
-	for m.params.chunkIndex(epochInChunk) == args.chunkIndex && epochInChunk >= minEpoch {
-		var chunkTarget types.Epoch
+	for m.params.chunkIndex(epochInChunk) == chunkIndex && epochInChunk >= minEpoch {
+		var chunkTarget primitives.Epoch
 		chunkTarget, err = chunkDataAtEpoch(m.params, m.data, validatorIndex, epochInChunk)
 		if err != nil {
 			err = errors.Wrapf(err, "could not get chunk data at epoch %d", epochInChunk)
@@ -368,17 +431,18 @@ func (m *MinSpanChunksSlice) Update(
 // more about how update exactly works, refer to the detailed documentation for the Update function for
 // MinSpanChunksSlice.
 func (m *MaxSpanChunksSlice) Update(
-	args *chunkUpdateArgs,
-	validatorIndex types.ValidatorIndex,
+	chunkIndex uint64,
+	currentEpoch primitives.Epoch,
+	validatorIndex primitives.ValidatorIndex,
 	startEpoch,
-	newTargetEpoch types.Epoch,
+	newTargetEpoch primitives.Epoch,
 ) (keepGoing bool, err error) {
 	epochInChunk := startEpoch
-	// We go down the chunk for the validator, updating every value starting at start_epoch up to
+	// We go down the chunk for the validator, updating every value starting at startEpoch up to
 	// and including the current epoch. As long as the epoch, e, is in the same chunk index and e <= currentEpoch,
 	// we proceed with a for loop.
-	for m.params.chunkIndex(epochInChunk) == args.chunkIndex && epochInChunk <= args.currentEpoch {
-		var chunkTarget types.Epoch
+	for m.params.chunkIndex(epochInChunk) == chunkIndex && epochInChunk <= currentEpoch {
+		var chunkTarget primitives.Epoch
 		chunkTarget, err = chunkDataAtEpoch(m.params, m.data, validatorIndex, epochInChunk)
 		if err != nil {
 			err = errors.Wrapf(err, "could not get chunk data at epoch %d", epochInChunk)
@@ -400,7 +464,7 @@ func (m *MaxSpanChunksSlice) Update(
 	}
 	// If the epoch to update now lies beyond the current chunk, then
 	// continue to the next chunk to update it.
-	keepGoing = epochInChunk <= args.currentEpoch
+	keepGoing = epochInChunk <= currentEpoch
 	return
 }
 
@@ -408,10 +472,10 @@ func (m *MaxSpanChunksSlice) Update(
 // a min span chunk for use in chunk updates. To compute this value, we look at the difference between
 // H = historyLength and the current epoch. Then, we check if the source epoch > difference. If so,
 // then the start epoch is source epoch - 1. Otherwise, we return to the caller a boolean signifying
-// the input argumets are invalid for the chunk and the start epoch does not exist.
+// the input arguments are invalid for the chunk and the start epoch does not exist.
 func (m *MinSpanChunksSlice) StartEpoch(
-	sourceEpoch, currentEpoch types.Epoch,
-) (epoch types.Epoch, exists bool) {
+	sourceEpoch, currentEpoch primitives.Epoch,
+) (epoch primitives.Epoch, exists bool) {
 	// Given min span chunks are used for detecting surrounding votes, we have no need
 	// for a start epoch of the chunk if the source epoch is 0 in the input arguments.
 	// To further clarify, min span chunks are updated in reverse order [a, b, c, d] where
@@ -421,7 +485,7 @@ func (m *MinSpanChunksSlice) StartEpoch(
 	if sourceEpoch == 0 {
 		return
 	}
-	var difference types.Epoch
+	var difference primitives.Epoch
 	if currentEpoch > m.params.historyLength {
 		difference = currentEpoch - m.params.historyLength
 	}
@@ -435,9 +499,9 @@ func (m *MinSpanChunksSlice) StartEpoch(
 
 // StartEpoch given a source epoch and current epoch, determines the start epoch of
 // a max span chunk for use in chunk updates. The source epoch cannot be >= the current epoch.
-func (_ *MaxSpanChunksSlice) StartEpoch(
-	sourceEpoch, currentEpoch types.Epoch,
-) (epoch types.Epoch, exists bool) {
+func (*MaxSpanChunksSlice) StartEpoch(
+	sourceEpoch, currentEpoch primitives.Epoch,
+) (epoch primitives.Epoch, exists bool) {
 	if sourceEpoch >= currentEpoch {
 		return
 	}
@@ -452,19 +516,19 @@ func (_ *MaxSpanChunksSlice) StartEpoch(
 // NextChunkStartEpoch given an epoch, determines the start epoch of the next chunk. For min
 // span chunks, this will be the last epoch of chunk index = (current chunk - 1). For example:
 //
-//                       chunk0     chunk1     chunk2
-//                         |          |          |
-//  max_spans_val_i = [[-, -, -], [-, -, -], [-, -, -]]
+//	                     chunk0     chunk1     chunk2
+//	                       |          |          |
+//	max_spans_val_i = [[-, -, -], [-, -, -], [-, -, -]]
 //
 // If C = chunkSize is 3 epochs per chunk, and we input start epoch of chunk 1 which is 3 then the next start
 // epoch is the last epoch of chunk 0, which is epoch 2. This is computed as:
 //
-//  last_epoch(chunkIndex(startEpoch)-1)
-//  last_epoch(chunkIndex(3) - 1)
-//  last_epoch(1 - 1)
-//  last_epoch(0)
-//  2
-func (m *MinSpanChunksSlice) NextChunkStartEpoch(startEpoch types.Epoch) types.Epoch {
+//	last_epoch(chunkIndex(startEpoch)-1)
+//	last_epoch(chunkIndex(3) - 1)
+//	last_epoch(1 - 1)
+//	last_epoch(0)
+//	2
+func (m *MinSpanChunksSlice) NextChunkStartEpoch(startEpoch primitives.Epoch) primitives.Epoch {
 	prevChunkIdx := m.params.chunkIndex(startEpoch)
 	if prevChunkIdx > 0 {
 		prevChunkIdx--
@@ -475,27 +539,27 @@ func (m *MinSpanChunksSlice) NextChunkStartEpoch(startEpoch types.Epoch) types.E
 // NextChunkStartEpoch given an epoch, determines the start epoch of the next chunk. For max
 // span chunks, this will be the start epoch of chunk index = (current chunk + 1). For example:
 //
-//                       chunk0     chunk1     chunk2
-//                         |          |          |
-//  max_spans_val_i = [[-, -, -], [-, -, -], [-, -, -]]
+//	                     chunk0     chunk1     chunk2
+//	                       |          |          |
+//	max_spans_val_i = [[-, -, -], [-, -, -], [-, -, -]]
 //
 // If C = chunkSize is 3 epochs per chunk, and we input start epoch of chunk 1 which is 3. The next start
-// epoch is the start epoch of chunk 2, which is epoch 4. This is computed as:
+// epoch is the start epoch of chunk 2, which is epoch 6. This is computed as:
 //
-//  first_epoch(chunkIndex(startEpoch)+1)
-//  first_epoch(chunkIndex(3)+1)
-//  first_epoch(1 + 1)
-//  first_epoch(2)
-//  4
-func (m *MaxSpanChunksSlice) NextChunkStartEpoch(startEpoch types.Epoch) types.Epoch {
+//	first_epoch(chunkIndex(startEpoch)+1)
+//	first_epoch(chunkIndex(3)+1)
+//	first_epoch(1 + 1)
+//	first_epoch(2)
+//	6
+func (m *MaxSpanChunksSlice) NextChunkStartEpoch(startEpoch primitives.Epoch) primitives.Epoch {
 	return m.params.firstEpoch(m.params.chunkIndex(startEpoch) + 1)
 }
 
 // Given a validator index and epoch, retrieves the target epoch at its specific
 // index for the validator index and epoch in a min/max span chunk.
 func chunkDataAtEpoch(
-	params *Parameters, chunk []uint16, validatorIdx types.ValidatorIndex, epoch types.Epoch,
-) (types.Epoch, error) {
+	params *Parameters, chunk []uint16, validatorIdx primitives.ValidatorIndex, epoch primitives.Epoch,
+) (primitives.Epoch, error) {
 	requiredLen := params.chunkSize * params.validatorChunkSize
 	if uint64(len(chunk)) != requiredLen {
 		return 0, fmt.Errorf("chunk has wrong length, %d, expected %d", len(chunk), requiredLen)
@@ -515,9 +579,9 @@ func chunkDataAtEpoch(
 func setChunkDataAtEpoch(
 	params *Parameters,
 	chunk []uint16,
-	validatorIdx types.ValidatorIndex,
+	validatorIdx primitives.ValidatorIndex,
 	epochInChunk,
-	targetEpoch types.Epoch,
+	targetEpoch primitives.Epoch,
 ) error {
 	distance, err := epochDistance(targetEpoch, epochInChunk)
 	if err != nil {
@@ -531,8 +595,8 @@ func setChunkDataAtEpoch(
 func setChunkRawDistance(
 	params *Parameters,
 	chunk []uint16,
-	validatorIdx types.ValidatorIndex,
-	epochInChunk types.Epoch,
+	validatorIdx primitives.ValidatorIndex,
+	epochInChunk primitives.Epoch,
 	distance uint16,
 ) error {
 	cellIdx := params.cellIndex(validatorIdx, epochInChunk)
@@ -546,7 +610,7 @@ func setChunkRawDistance(
 // Computes a distance between two epochs. Given the result stored in
 // min/max spans is at maximum WEAK_SUBJECTIVITY_PERIOD, we are guaranteed the
 // distance can be represented as a uint16 safely.
-func epochDistance(epoch, baseEpoch types.Epoch) (uint16, error) {
+func epochDistance(epoch, baseEpoch primitives.Epoch) (uint16, error) {
 	if baseEpoch > epoch {
 		return 0, fmt.Errorf("base epoch %d cannot be less than epoch %d", baseEpoch, epoch)
 	}

@@ -39,6 +39,7 @@ func supportedPlatforms() []platform {
 		{os: "linux", arch: "amd64"},
 		{os: "linux", arch: "arm64"},
 		{os: "darwin", arch: "amd64", majorVersion: 10, minorVersion: 14},
+		{os: "darwin", arch: "arm64", majorVersion: 12, minorVersion: 5},
 		{os: "windows", arch: "amd64"},
 	}
 }
@@ -102,7 +103,12 @@ func WarnIfPlatformNotSupported(ctx context.Context) {
 		return
 	}
 	if !supported {
-		log.Warn("This platform is not supported. The following platforms are supported: Linux/AMD64," +
-			" Linux/ARM64, Mac OS X/AMD64 (10.14+ only), and Windows/AMD64")
+		log.Warn(`This platform is not supported. The following platforms are supported:
+		- Linux/AMD64
+		- Linux/ARM64
+		- Mac OS X/AMD64 (from 10.14+)
+		- Mac OS X/ARM64 (from 12.5+)
+		- Windows/AMD64`,
+		)
 	}
 }

@@ -15,31 +15,13 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v3/crypto/rand"
-	"github.com/prysmaticlabs/prysm/v3/io/file"
-	pb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/validator-client"
-	"github.com/prysmaticlabs/prysm/v3/validator/accounts/wallet"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
+	"github.com/prysmaticlabs/prysm/v5/crypto/rand"
+	"github.com/prysmaticlabs/prysm/v5/io/file"
 )
 
 const (
-	authTokenFileName = "auth-token"
+	AuthTokenFileName = "auth-token"
 )
-
-// Initialize returns metadata regarding whether the caller has authenticated and has a wallet.
-func (s *Server) Initialize(_ context.Context, _ *emptypb.Empty) (*pb.InitializeAuthResponse, error) {
-	walletExists, err := wallet.Exists(s.walletDir)
-	if err != nil {
-		return nil, status.Error(codes.Internal, "Could not check if wallet exists")
-	}
-	authTokenPath := filepath.Join(s.walletDir, authTokenFileName)
-	return &pb.InitializeAuthResponse{
-		HasSignedUp: file.FileExists(authTokenPath),
-		HasWallet:   walletExists,
-	}, nil
-}
 
 // CreateAuthToken generates a new jwt key, token and writes them
 // to a file in the specified directory. Also, it logs out a prepared URL
@@ -53,7 +35,7 @@ func CreateAuthToken(walletDirPath, validatorWebAddr string) error {
 	if err != nil {
 		return err
 	}
-	authTokenPath := filepath.Join(walletDirPath, authTokenFileName)
+	authTokenPath := filepath.Join(walletDirPath, AuthTokenFileName)
 	log.Infof("Generating auth token and saving it to %s", authTokenPath)
 	if err := saveAuthToken(walletDirPath, jwtKey, token); err != nil {
 		return err
@@ -68,8 +50,8 @@ func CreateAuthToken(walletDirPath, validatorWebAddr string) error {
 // browser. The web interface authenticates by looking for this token in the query parameters
 // of the URL. This token is then used as the bearer token for jwt auth.
 func (s *Server) initializeAuthToken(walletDir string) (string, error) {
-	authTokenFile := filepath.Join(walletDir, authTokenFileName)
-	if file.FileExists(authTokenFile) {
+	authTokenFile := filepath.Join(walletDir, AuthTokenFileName)
+	if file.Exists(authTokenFile) {
 		// #nosec G304
 		f, err := os.Open(authTokenFile)
 		if err != nil {
@@ -145,7 +127,7 @@ func logValidatorWebAuth(validatorWebAddr, token string, tokenPath string) {
 		url.QueryEscape(token),
 	)
 	log.Infof(
-		"Once your validator process is runinng, navigate to the link below to authenticate with " +
+		"Once your validator process is running, navigate to the link below to authenticate with " +
 			"the Prysm web interface",
 	)
 	log.Info(webAuthURL)
@@ -153,21 +135,30 @@ func logValidatorWebAuth(validatorWebAddr, token string, tokenPath string) {
 }
 
 func saveAuthToken(walletDirPath string, jwtKey []byte, token string) error {
-	hashFilePath := filepath.Join(walletDirPath, authTokenFileName)
+	hashFilePath := filepath.Join(walletDirPath, AuthTokenFileName)
 	bytesBuf := new(bytes.Buffer)
-	if _, err := bytesBuf.Write([]byte(fmt.Sprintf("%x", jwtKey))); err != nil {
+	if _, err := bytesBuf.WriteString(fmt.Sprintf("%x", jwtKey)); err != nil {
 		return err
 	}
-	if _, err := bytesBuf.Write([]byte("\n")); err != nil {
+	if _, err := bytesBuf.WriteString("\n"); err != nil {
 		return err
 	}
-	if _, err := bytesBuf.Write([]byte(token)); err != nil {
+	if _, err := bytesBuf.WriteString(token); err != nil {
 		return err
 	}
-	if _, err := bytesBuf.Write([]byte("\n")); err != nil {
+	if _, err := bytesBuf.WriteString("\n"); err != nil {
 		return err
 	}
-	return file.WriteFile(hashFilePath, bytesBuf.Bytes())
+
+	if err := file.MkdirAll(walletDirPath); err != nil {
+		return errors.Wrapf(err, "could not create directory %s", walletDirPath)
+	}
+
+	if err := file.WriteFile(hashFilePath, bytesBuf.Bytes()); err != nil {
+		return errors.Wrapf(err, "could not write to file %s", hashFilePath)
+	}
+
+	return nil
 }
 
 func readAuthTokenFile(r io.Reader) (secret []byte, token string, err error) {

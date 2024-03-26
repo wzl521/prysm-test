@@ -1,18 +1,23 @@
 package sync
 
 import (
-	"github.com/prysmaticlabs/prysm/v3/async/event"
-	blockfeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/block"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/operation"
-	statefeed "github.com/prysmaticlabs/prysm/v3/beacon-chain/core/feed/state"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/execution"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/attestations"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/slashings"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/synccommittee"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/operations/voluntaryexits"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stategen"
+	"github.com/prysmaticlabs/prysm/v5/async/event"
+	blockfeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/block"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/operation"
+	statefeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/state"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db/filesystem"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/execution"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/attestations"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/blstoexec"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/slashings"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/synccommittee"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/operations/voluntaryexits"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stategen"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/sync/backfill/coverage"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/verification"
 )
 
 type Option func(s *Service) error
@@ -66,6 +71,13 @@ func WithSyncCommsPool(syncCommsPool synccommittee.Pool) Option {
 	}
 }
 
+func WithBlsToExecPool(blsToExecPool blstoexec.PoolManager) Option {
+	return func(s *Service) error {
+		s.cfg.blsToExecPool = blsToExecPool
+		return nil
+	}
+}
+
 func WithChainService(chain blockchainService) Option {
 	return func(s *Service) error {
 		s.cfg.chain = chain
@@ -76,13 +88,6 @@ func WithChainService(chain blockchainService) Option {
 func WithInitialSync(initialSync Checker) Option {
 	return func(s *Service) error {
 		s.cfg.initialSync = initialSync
-		return nil
-	}
-}
-
-func WithStateNotifier(stateNotifier statefeed.Notifier) Option {
-	return func(s *Service) error {
-		s.cfg.stateNotifier = stateNotifier
 		return nil
 	}
 }
@@ -122,9 +127,56 @@ func WithSlasherBlockHeadersFeed(slasherBlockHeadersFeed *event.Feed) Option {
 	}
 }
 
-func WithExecutionPayloadReconstructor(r execution.ExecutionPayloadReconstructor) Option {
+func WithPayloadReconstructor(r execution.PayloadReconstructor) Option {
 	return func(s *Service) error {
 		s.cfg.executionPayloadReconstructor = r
+		return nil
+	}
+}
+
+func WithClockWaiter(cw startup.ClockWaiter) Option {
+	return func(s *Service) error {
+		s.clockWaiter = cw
+		return nil
+	}
+}
+
+func WithInitialSyncComplete(c chan struct{}) Option {
+	return func(s *Service) error {
+		s.initialSyncComplete = c
+		return nil
+	}
+}
+
+// WithStateNotifier to notify an event feed of state processing.
+func WithStateNotifier(n statefeed.Notifier) Option {
+	return func(s *Service) error {
+		s.cfg.stateNotifier = n
+		return nil
+	}
+}
+
+// WithBlobStorage gives the sync package direct access to BlobStorage.
+func WithBlobStorage(b *filesystem.BlobStorage) Option {
+	return func(s *Service) error {
+		s.cfg.blobStorage = b
+		return nil
+	}
+}
+
+// WithVerifierWaiter gives the sync package direct access to the verifier waiter.
+func WithVerifierWaiter(v *verification.InitializerWaiter) Option {
+	return func(s *Service) error {
+		s.verifierWaiter = v
+		return nil
+	}
+}
+
+// WithAvailableBlocker allows the sync package to access the current
+// status of backfill.
+func WithAvailableBlocker(avb coverage.AvailableBlocker) Option {
+	return func(s *Service) error {
+		s.availableBlocker = avb
 		return nil
 	}
 }

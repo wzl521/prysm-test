@@ -6,15 +6,12 @@ import (
 	"reflect"
 
 	"github.com/pkg/errors"
-	customtypes "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/state-native/custom-types"
-	nativetypes "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/state-native/types"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/stateutil"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state/types"
-	"github.com/prysmaticlabs/prysm/v3/crypto/hash"
-	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
-	pmath "github.com/prysmaticlabs/prysm/v3/math"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v3/runtime/version"
+	customtypes "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native/custom-types"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native/types"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state/stateutil"
+	multi_value_slice "github.com/prysmaticlabs/prysm/v5/container/multi-value-slice"
+	pmath "github.com/prysmaticlabs/prysm/v5/math"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 )
 
 // ProofFromMerkleLayers creates a proof starting at the leaf index of the state Merkle layers.
@@ -43,36 +40,39 @@ func (f *FieldTrie) validateIndices(idxs []uint64) error {
 	}
 	for _, idx := range idxs {
 		if idx >= length {
-			return errors.Errorf("invalid index for field %s: %d >= length %d", f.field.String(version.Phase0), idx, length)
+			return errors.Errorf("invalid index for field %s: %d >= length %d", f.field.String(), idx, length)
 		}
 	}
 	return nil
 }
 
-func validateElements(field types.BeaconStateField, dataType types.DataType, elements interface{}, length uint64) error {
-	if dataType == types.CompressedArray {
+func validateElements(field types.FieldIndex, fieldInfo types.DataType, elements interface{}, length uint64) error {
+	if fieldInfo == types.CompressedArray {
 		comLength, err := field.ElemsInChunk()
 		if err != nil {
 			return err
 		}
 		length *= comLength
 	}
+	if val, ok := elements.(sliceAccessor); ok {
+		totalLen := val.Len(val.State())
+		if uint64(totalLen) > length {
+			return errors.Errorf("elements length is larger than expected for field %s: %d > %d", field.String(), totalLen, length)
+		}
+		return nil
+	}
 	val := reflect.Indirect(reflect.ValueOf(elements))
 	if uint64(val.Len()) > length {
-		return errors.Errorf("elements length is larger than expected for field %s: %d > %d", field.String(version.Phase0), val.Len(), length)
+		return errors.Errorf("elements length is larger than expected for field %s: %d > %d", field.String(), val.Len(), length)
 	}
 	return nil
 }
 
 // fieldConverters converts the corresponding field and the provided elements to the appropriate roots.
-func fieldConverters(field types.BeaconStateField, indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
+func fieldConverters(field types.FieldIndex, indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
 	switch field {
-	case types.BlockRoots:
-		return convertBlockRoots(indices, elements, convertAll)
-	case types.StateRoots:
-		return convertStateRoots(indices, elements, convertAll)
-	case types.RandaoMixes:
-		return convertRandaoMixes(indices, elements, convertAll)
+	case types.BlockRoots, types.StateRoots, types.RandaoMixes:
+		return convertRoots(indices, elements, convertAll)
 	case types.Eth1DataVotes:
 		return convertEth1DataVotes(indices, elements, convertAll)
 	case types.Validators:
@@ -86,183 +86,120 @@ func fieldConverters(field types.BeaconStateField, indices []uint64, elements in
 	}
 }
 
-// fieldConvertersNative converts the corresponding field and the provided elements to the appropriate roots.
-func fieldConvertersNative(field types.BeaconStateField, indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
-	switch field {
-	case nativetypes.BlockRoots:
-		return convertBlockRoots(indices, elements, convertAll)
-	case nativetypes.StateRoots:
-		return convertStateRoots(indices, elements, convertAll)
-	case nativetypes.RandaoMixes:
-		return convertRandaoMixes(indices, elements, convertAll)
-	case nativetypes.Eth1DataVotes:
-		return convertEth1DataVotes(indices, elements, convertAll)
-	case nativetypes.Validators:
-		return convertValidators(indices, elements, convertAll)
-	case nativetypes.PreviousEpochAttestations, nativetypes.CurrentEpochAttestations:
-		return convertAttestations(indices, elements, convertAll)
-	case nativetypes.Balances:
-		return convertBalances(indices, elements, convertAll)
+func convertRoots(indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
+	switch castedType := elements.(type) {
+	case customtypes.BlockRoots:
+		return handle32ByteMVslice(multi_value_slice.BuildEmptyCompositeSlice[[32]byte](castedType), indices, convertAll)
+	case customtypes.StateRoots:
+		return handle32ByteMVslice(multi_value_slice.BuildEmptyCompositeSlice[[32]byte](castedType), indices, convertAll)
+	case customtypes.RandaoMixes:
+		return handle32ByteMVslice(multi_value_slice.BuildEmptyCompositeSlice[[32]byte](castedType), indices, convertAll)
+	case multi_value_slice.MultiValueSliceComposite[[32]byte]:
+		return handle32ByteMVslice(castedType, indices, convertAll)
 	default:
-		return [][32]byte{}, errors.Errorf("got unsupported type of %v", reflect.TypeOf(elements).Name())
-	}
-}
-
-func convertBlockRoots(indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
-	switch val := elements.(type) {
-	case [][]byte:
-		return handleByteArrays(val, indices, convertAll)
-	case *customtypes.BlockRoots:
-		return handle32ByteArrays(val[:], indices, convertAll)
-	default:
-		return nil, errors.Errorf("Incorrect type used for block roots")
-	}
-}
-
-func convertStateRoots(indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
-	switch val := elements.(type) {
-	case [][]byte:
-		return handleByteArrays(val, indices, convertAll)
-	case *customtypes.StateRoots:
-		return handle32ByteArrays(val[:], indices, convertAll)
-	default:
-		return nil, errors.Errorf("Incorrect type used for state roots")
-	}
-}
-
-func convertRandaoMixes(indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
-	switch val := elements.(type) {
-	case [][]byte:
-		return handleByteArrays(val, indices, convertAll)
-	case *customtypes.RandaoMixes:
-		return handle32ByteArrays(val[:], indices, convertAll)
-	default:
-		return nil, errors.Errorf("Incorrect type used for randao mixes")
+		return nil, errors.Errorf("non-existent type provided %T", castedType)
 	}
 }
 
 func convertEth1DataVotes(indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
 	val, ok := elements.([]*ethpb.Eth1Data)
 	if !ok {
-		return nil, errors.Errorf("Wanted type of %v but got %v",
-			reflect.TypeOf([]*ethpb.Eth1Data{}).Name(), reflect.TypeOf(elements).Name())
+		return nil, errors.Errorf("Wanted type of %T but got %T", []*ethpb.Eth1Data{}, elements)
 	}
 	return handleEth1DataSlice(val, indices, convertAll)
 }
 
 func convertValidators(indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
-	val, ok := elements.([]*ethpb.Validator)
-	if !ok {
-		return nil, errors.Errorf("Wanted type of %v but got %v",
-			reflect.TypeOf([]*ethpb.Validator{}).Name(), reflect.TypeOf(elements).Name())
+	switch casted := elements.(type) {
+	case []*ethpb.Validator:
+		return handleValidatorMVSlice(multi_value_slice.BuildEmptyCompositeSlice[*ethpb.Validator](casted), indices, convertAll)
+	case multi_value_slice.MultiValueSliceComposite[*ethpb.Validator]:
+		return handleValidatorMVSlice(casted, indices, convertAll)
+	default:
+		return nil, errors.Errorf("Wanted type of %T but got %T", []*ethpb.Validator{}, elements)
 	}
-	return handleValidatorSlice(val, indices, convertAll)
 }
 
 func convertAttestations(indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
 	val, ok := elements.([]*ethpb.PendingAttestation)
 	if !ok {
-		return nil, errors.Errorf("Wanted type of %v but got %v",
-			reflect.TypeOf([]*ethpb.PendingAttestation{}).Name(), reflect.TypeOf(elements).Name())
+		return nil, errors.Errorf("Wanted type of %T but got %T", []*ethpb.PendingAttestation{}, elements)
 	}
 	return handlePendingAttestationSlice(val, indices, convertAll)
 }
 
 func convertBalances(indices []uint64, elements interface{}, convertAll bool) ([][32]byte, error) {
-	val, ok := elements.([]uint64)
-	if !ok {
-		return nil, errors.Errorf("Wanted type of %v but got %v",
-			reflect.TypeOf([]uint64{}).Name(), reflect.TypeOf(elements).Name())
+	switch casted := elements.(type) {
+	case []uint64:
+		return handleBalanceMVSlice(multi_value_slice.BuildEmptyCompositeSlice[uint64](casted), indices, convertAll)
+	case multi_value_slice.MultiValueSliceComposite[uint64]:
+		return handleBalanceMVSlice(casted, indices, convertAll)
+	default:
+		return nil, errors.Errorf("Wanted type of %T but got %T", []uint64{}, elements)
 	}
-	return handleBalanceSlice(val, indices, convertAll)
 }
 
-// handleByteArrays computes and returns byte arrays in a slice of root format.
-func handleByteArrays(val [][]byte, indices []uint64, convertAll bool) ([][32]byte, error) {
+// handle32ByteMVslice computes and returns 32 byte arrays in a slice of root format. This is modified
+// to be used with multivalue slices.
+func handle32ByteMVslice(mv multi_value_slice.MultiValueSliceComposite[[32]byte],
+	indices []uint64, convertAll bool) ([][32]byte, error) {
 	length := len(indices)
 	if convertAll {
-		length = len(val)
-	}
-	roots := make([][32]byte, 0, length)
-	rootCreator := func(input []byte) {
-		newRoot := bytesutil.ToBytes32(input)
-		roots = append(roots, newRoot)
-	}
-	if convertAll {
-		for i := range val {
-			rootCreator(val[i])
-		}
-		return roots, nil
-	}
-	if len(val) > 0 {
-		for _, idx := range indices {
-			if idx > uint64(len(val))-1 {
-				return nil, fmt.Errorf("index %d greater than number of byte arrays %d", idx, len(val))
-			}
-			rootCreator(val[idx])
-		}
-	}
-	return roots, nil
-}
-
-// handle32ByteArrays computes and returns 32 byte arrays in a slice of root format.
-func handle32ByteArrays(val [][32]byte, indices []uint64, convertAll bool) ([][32]byte, error) {
-	length := len(indices)
-	if convertAll {
-		length = len(val)
+		length = mv.Len(mv.State())
 	}
 	roots := make([][32]byte, 0, length)
 	rootCreator := func(input [32]byte) {
 		roots = append(roots, input)
 	}
 	if convertAll {
+		val := mv.Value(mv.State())
 		for i := range val {
 			rootCreator(val[i])
 		}
 		return roots, nil
 	}
-	if len(val) > 0 {
+	totalLen := mv.Len(mv.State())
+	if totalLen > 0 {
 		for _, idx := range indices {
-			if idx > uint64(len(val))-1 {
-				return nil, fmt.Errorf("index %d greater than number of byte arrays %d", idx, len(val))
+			if idx > uint64(totalLen)-1 {
+				return nil, fmt.Errorf("index %d greater than number of byte arrays %d", idx, totalLen)
 			}
-			rootCreator(val[idx])
+			val, err := mv.At(mv.State(), idx)
+			if err != nil {
+				return nil, err
+			}
+			rootCreator(val)
 		}
 	}
 	return roots, nil
 }
 
-// handleValidatorSlice returns the validator indices in a slice of root format.
-func handleValidatorSlice(val []*ethpb.Validator, indices []uint64, convertAll bool) ([][32]byte, error) {
+// handleValidatorMVSlice returns the validator indices in a slice of root format.
+func handleValidatorMVSlice(mv multi_value_slice.MultiValueSliceComposite[*ethpb.Validator], indices []uint64, convertAll bool) ([][32]byte, error) {
 	length := len(indices)
 	if convertAll {
-		length = len(val)
+		return stateutil.OptimizedValidatorRoots(mv.Value(mv.State()))
 	}
 	roots := make([][32]byte, 0, length)
-	hasher := hash.CustomSHA256Hasher()
 	rootCreator := func(input *ethpb.Validator) error {
-		newRoot, err := stateutil.ValidatorRootWithHasher(hasher, input)
+		newRoot, err := stateutil.ValidatorRootWithHasher(input)
 		if err != nil {
 			return err
 		}
 		roots = append(roots, newRoot)
 		return nil
 	}
-	if convertAll {
-		for i := range val {
-			err := rootCreator(val[i])
+	totalLen := mv.Len(mv.State())
+	if totalLen > 0 {
+		for _, idx := range indices {
+			if idx > uint64(totalLen)-1 {
+				return nil, fmt.Errorf("index %d greater than number of validators %d", idx, totalLen)
+			}
+			val, err := mv.At(mv.State(), idx)
 			if err != nil {
 				return nil, err
 			}
-		}
-		return roots, nil
-	}
-	if len(val) > 0 {
-		for _, idx := range indices {
-			if idx > uint64(len(val))-1 {
-				return nil, fmt.Errorf("index %d greater than number of validators %d", idx, len(val))
-			}
-			err := rootCreator(val[idx])
+			err = rootCreator(val)
 			if err != nil {
 				return nil, err
 			}
@@ -278,9 +215,8 @@ func handleEth1DataSlice(val []*ethpb.Eth1Data, indices []uint64, convertAll boo
 		length = len(val)
 	}
 	roots := make([][32]byte, 0, length)
-	hasher := hash.CustomSHA256Hasher()
 	rootCreator := func(input *ethpb.Eth1Data) error {
-		newRoot, err := stateutil.Eth1DataRootWithHasher(hasher, input)
+		newRoot, err := stateutil.Eth1DataRootWithHasher(input)
 		if err != nil {
 			return err
 		}
@@ -317,9 +253,8 @@ func handlePendingAttestationSlice(val []*ethpb.PendingAttestation, indices []ui
 		length = len(val)
 	}
 	roots := make([][32]byte, 0, length)
-	hasher := hash.CustomSHA256Hasher()
 	rootCreator := func(input *ethpb.PendingAttestation) error {
-		newRoot, err := stateutil.PendingAttRootWithHasher(hasher, input)
+		newRoot, err := stateutil.PendingAttRootWithHasher(input)
 		if err != nil {
 			return err
 		}
@@ -349,12 +284,13 @@ func handlePendingAttestationSlice(val []*ethpb.PendingAttestation, indices []ui
 	return roots, nil
 }
 
-// handleBalanceSlice returns the root of a slice of validator balances.
-func handleBalanceSlice(val, indices []uint64, convertAll bool) ([][32]byte, error) {
+func handleBalanceMVSlice(mv multi_value_slice.MultiValueSliceComposite[uint64], indices []uint64, convertAll bool) ([][32]byte, error) {
 	if convertAll {
+		val := mv.Value(mv.State())
 		return stateutil.PackUint64IntoChunks(val)
 	}
-	if len(val) > 0 {
+	totalLen := mv.Len(mv.State())
+	if totalLen > 0 {
 		numOfElems, err := types.Balances.ElemsInChunk()
 		if err != nil {
 			return nil, err
@@ -369,7 +305,7 @@ func handleBalanceSlice(val, indices []uint64, convertAll bool) ([][32]byte, err
 			// are compressed according to 4 values -> 1 chunk.
 			startIdx := idx / numOfElems
 			startGroup := startIdx * numOfElems
-			chunk := [32]byte{}
+			var chunk [32]byte
 			sizeOfElem := len(chunk) / iNumOfElems
 			for i, j := 0, startGroup; j < startGroup+numOfElems; i, j = i+sizeOfElem, j+1 {
 				wantedVal := uint64(0)
@@ -377,8 +313,12 @@ func handleBalanceSlice(val, indices []uint64, convertAll bool) ([][32]byte, err
 				// then you will need to zero out the rest of the chunk. Ex : 41 indexes,
 				// so 41 % 4 = 1 . There are 3 indexes, which do not exist yet but we
 				// have to add in as a root. These 3 indexes are then given a 'zero' value.
-				if j < uint64(len(val)) {
-					wantedVal = val[j]
+				if j < uint64(totalLen) {
+					val, err := mv.At(mv.State(), j)
+					if err != nil {
+						return nil, err
+					}
+					wantedVal = val
 				}
 				binary.LittleEndian.PutUint64(chunk[i:i+sizeOfElem], wantedVal)
 			}

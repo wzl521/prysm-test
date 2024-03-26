@@ -1,11 +1,10 @@
 package wallet
 
 import (
-	"github.com/prysmaticlabs/prysm/v3/cmd"
-	"github.com/prysmaticlabs/prysm/v3/cmd/validator/flags"
-	"github.com/prysmaticlabs/prysm/v3/config/features"
-	"github.com/prysmaticlabs/prysm/v3/runtime/tos"
-	"github.com/prysmaticlabs/prysm/v3/validator/accounts"
+	"github.com/prysmaticlabs/prysm/v5/cmd"
+	"github.com/prysmaticlabs/prysm/v5/cmd/validator/flags"
+	"github.com/prysmaticlabs/prysm/v5/config/features"
+	"github.com/prysmaticlabs/prysm/v5/runtime/tos"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
@@ -16,7 +15,7 @@ var log = logrus.WithField("prefix", "wallet")
 var Commands = &cli.Command{
 	Name:     "wallet",
 	Category: "wallet",
-	Usage:    "defines commands for interacting with Ethereum validator wallets",
+	Usage:    "Defines commands for interacting with Ethereum validator wallets.",
 	Subcommands: []*cli.Command{
 		{
 			Name: "create",
@@ -25,8 +24,6 @@ var Commands = &cli.Command{
 			Flags: cmd.WrapFlags([]cli.Flag{
 				flags.WalletDirFlag,
 				flags.KeymanagerKindFlag,
-				flags.GrpcRemoteAddressFlag,
-				flags.DisableRemoteSignerTlsFlag,
 				flags.RemoteSignerCertPathFlag,
 				flags.RemoteSignerKeyPathFlag,
 				flags.RemoteSignerCACertPathFlag,
@@ -35,41 +32,8 @@ var Commands = &cli.Command{
 				flags.SkipMnemonic25thWordCheckFlag,
 				features.Mainnet,
 				features.PraterTestnet,
-				features.RopstenTestnet,
 				features.SepoliaTestnet,
-				cmd.AcceptTosFlag,
-			}),
-			Before: func(cliCtx *cli.Context) error {
-				if err := cmd.LoadFlagsFromConfig(cliCtx, cliCtx.Command.Flags); err != nil {
-					return err
-				}
-				return tos.VerifyTosAcceptedOrPrompt(cliCtx)
-			},
-			Action: func(cliCtx *cli.Context) error {
-				if err := features.ConfigureValidator(cliCtx); err != nil {
-					return err
-				}
-				if _, err := accounts.CreateAndSaveWalletCli(cliCtx); err != nil {
-					log.WithError(err).Fatal("Could not create a wallet")
-				}
-				return nil
-			},
-		},
-		{
-			Name:  "edit-config",
-			Usage: "edits a wallet configuration options, such as gRPC connection credentials and TLS certificates",
-			Flags: cmd.WrapFlags([]cli.Flag{
-				flags.WalletDirFlag,
-				flags.WalletPasswordFileFlag,
-				flags.GrpcRemoteAddressFlag,
-				flags.DisableRemoteSignerTlsFlag,
-				flags.RemoteSignerCertPathFlag,
-				flags.RemoteSignerKeyPathFlag,
-				flags.RemoteSignerCACertPathFlag,
-				features.Mainnet,
-				features.PraterTestnet,
-				features.RopstenTestnet,
-				features.SepoliaTestnet,
+				features.HoleskyTestnet,
 				cmd.AcceptTosFlag,
 			}),
 			Before: func(cliCtx *cli.Context) error {
@@ -82,8 +46,8 @@ var Commands = &cli.Command{
 				return features.ConfigureValidator(cliCtx)
 			},
 			Action: func(cliCtx *cli.Context) error {
-				if err := remoteWalletEdit(cliCtx); err != nil {
-					log.WithError(err).Fatal("Could not edit wallet configuration")
+				if err := walletCreate(cliCtx); err != nil {
+					log.WithError(err).Fatal("Could not create a wallet")
 				}
 				return nil
 			},
@@ -100,8 +64,8 @@ var Commands = &cli.Command{
 				flags.SkipMnemonic25thWordCheckFlag,
 				features.Mainnet,
 				features.PraterTestnet,
-				features.RopstenTestnet,
 				features.SepoliaTestnet,
+				features.HoleskyTestnet,
 				cmd.AcceptTosFlag,
 			}),
 			Before: func(cliCtx *cli.Context) error {

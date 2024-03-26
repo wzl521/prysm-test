@@ -9,20 +9,20 @@ import (
 	"os"
 	"time"
 
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/cache/depositcache"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/execution"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
-	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v3/runtime"
-	"github.com/prysmaticlabs/prysm/v3/runtime/interop"
-	"github.com/prysmaticlabs/prysm/v3/time/slots"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/execution"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
+	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/runtime"
+	"github.com/prysmaticlabs/prysm/v5/runtime/interop"
+	"github.com/prysmaticlabs/prysm/v5/time/slots"
 )
 
 var _ runtime.Service = (*Service)(nil)
-var _ depositcache.DepositFetcher = (*Service)(nil)
+var _ cache.FinalizedFetcher = (*Service)(nil)
 var _ execution.ChainStartFetcher = (*Service)(nil)
 
 // Service spins up an client interoperability service that handles responsibilities such
@@ -34,12 +34,42 @@ type Service struct {
 	chainStartDeposits []*ethpb.Deposit
 }
 
+// All of these methods are stubs as they are not used by a node running with deterministic-genesis.
+
+func (s *Service) AllDepositContainers(ctx context.Context) []*ethpb.DepositContainer {
+	log.Errorf("AllDepositContainers should not be called")
+	return nil
+}
+
+func (s *Service) InsertPendingDeposit(ctx context.Context, d *ethpb.Deposit, blockNum uint64, index int64, depositRoot [32]byte) {
+	log.Errorf("InsertPendingDeposit should not be called")
+}
+
+func (s *Service) PendingDeposits(ctx context.Context, untilBlk *big.Int) []*ethpb.Deposit {
+	log.Errorf("PendingDeposits should not be called")
+	return nil
+}
+
+func (s *Service) PendingContainers(ctx context.Context, untilBlk *big.Int) []*ethpb.DepositContainer {
+	log.Errorf("PendingContainers should not be called")
+	return nil
+}
+
+func (s *Service) PrunePendingDeposits(ctx context.Context, merkleTreeIndex int64) {
+	log.Errorf("PrunePendingDeposits should not be called")
+}
+
+func (s *Service) PruneProofs(ctx context.Context, untilDepositIndex int64) error {
+	log.Errorf("PruneProofs should not be called")
+	return nil
+}
+
 // Config options for the interop service.
 type Config struct {
 	GenesisTime   uint64
 	NumValidators uint64
 	BeaconDB      db.HeadAccessDatabase
-	DepositCache  *depositcache.DepositCache
+	DepositCache  cache.DepositCache
 	GenesisPath   string
 }
 
@@ -69,7 +99,7 @@ func (s *Service) Start() {
 		if err := genesisState.UnmarshalSSZ(data); err != nil {
 			log.WithError(err).Fatal("Could not unmarshal pre-loaded state")
 		}
-		genesisTrie, err := v1.InitializeFromProto(genesisState)
+		genesisTrie, err := state_native.InitializeFromProtoPhase0(genesisState)
 		if err != nil {
 			log.WithError(err).Fatal("Could not get state trie")
 		}
@@ -84,7 +114,7 @@ func (s *Service) Start() {
 	if err != nil {
 		log.WithError(err).Fatal("Could not generate interop genesis state")
 	}
-	genesisTrie, err := v1.InitializeFromProto(genesisState)
+	genesisTrie, err := state_native.InitializeFromProtoPhase0(genesisState)
 	if err != nil {
 		log.WithError(err).Fatal("Could not get state trie")
 	}
@@ -125,7 +155,7 @@ func (_ *Service) ChainStartEth1Data() *ethpb.Eth1Data {
 
 // PreGenesisState returns an empty beacon state.
 func (_ *Service) PreGenesisState() state.BeaconState {
-	s, err := v1.InitializeFromProto(&ethpb.BeaconState{})
+	s, err := state_native.InitializeFromProtoPhase0(&ethpb.BeaconState{})
 	if err != nil {
 		panic("could not initialize state")
 	}
@@ -148,8 +178,8 @@ func (_ *Service) DepositsNumberAndRootAtHeight(_ context.Context, _ *big.Int) (
 }
 
 // FinalizedDeposits mocks out the deposit cache functionality for interop.
-func (_ *Service) FinalizedDeposits(_ context.Context) *depositcache.FinalizedDeposits {
-	return nil
+func (_ *Service) FinalizedDeposits(ctx context.Context) (cache.FinalizedDeposits, error) {
+	return nil, nil
 }
 
 // NonFinalizedDeposits mocks out the deposit cache functionality for interop.
@@ -164,7 +194,7 @@ func (s *Service) saveGenesisState(ctx context.Context, genesisState state.Beaco
 
 	s.chainStartDeposits = make([]*ethpb.Deposit, genesisState.NumValidators())
 
-	for i := types.ValidatorIndex(0); uint64(i) < uint64(genesisState.NumValidators()); i++ {
+	for i := primitives.ValidatorIndex(0); uint64(i) < uint64(genesisState.NumValidators()); i++ {
 		pk := genesisState.PubkeyAtIndex(i)
 		s.chainStartDeposits[i] = &ethpb.Deposit{
 			Data: &ethpb.Deposit_Data{

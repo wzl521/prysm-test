@@ -8,12 +8,12 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/golang/mock/gomock"
 	"github.com/pkg/errors"
-	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/testing/require"
 )
 
 func TestSubmitValidatorRegistrations(t *testing.T) {
@@ -21,27 +21,76 @@ func TestSubmitValidatorRegistrations(t *testing.T) {
 	defer finish()
 
 	ctx := context.Background()
-	require.NoError(t, nil, SubmitValidatorRegistrations(ctx, m.validatorClient, []*ethpb.SignedValidatorRegistrationV1{}))
+	validatorRegsBatchSize := 2
+	require.NoError(t, nil, SubmitValidatorRegistrations(ctx, m.validatorClient, []*ethpb.SignedValidatorRegistrationV1{}, validatorRegsBatchSize))
 
-	reg := &ethpb.ValidatorRegistrationV1{
-		FeeRecipient: bytesutil.PadTo([]byte("fee"), 20),
-		GasLimit:     123456,
-		Timestamp:    uint64(time.Now().Unix()),
-		Pubkey:       validatorKey.PublicKey().Marshal(),
+	regs := [...]*ethpb.ValidatorRegistrationV1{
+		{
+			FeeRecipient: bytesutil.PadTo([]byte("fee"), 20),
+			GasLimit:     123,
+			Timestamp:    uint64(time.Now().Unix()),
+			Pubkey:       validatorKey.PublicKey().Marshal(),
+		},
+		{
+			FeeRecipient: bytesutil.PadTo([]byte("fee"), 20),
+			GasLimit:     456,
+			Timestamp:    uint64(time.Now().Unix()),
+			Pubkey:       validatorKey.PublicKey().Marshal(),
+		},
+		{
+			FeeRecipient: bytesutil.PadTo([]byte("fee"), 20),
+			GasLimit:     789,
+			Timestamp:    uint64(time.Now().Unix()),
+			Pubkey:       validatorKey.PublicKey().Marshal(),
+		},
 	}
 
-	m.validatorClient.EXPECT().
-		SubmitValidatorRegistrations(gomock.Any(), &ethpb.SignedValidatorRegistrationsV1{
-			Messages: []*ethpb.SignedValidatorRegistrationV1{
-				{Message: reg,
-					Signature: params.BeaconConfig().ZeroHash[:]},
+	gomock.InOrder(
+		m.validatorClient.EXPECT().
+			SubmitValidatorRegistrations(gomock.Any(), &ethpb.SignedValidatorRegistrationsV1{
+				Messages: []*ethpb.SignedValidatorRegistrationV1{
+					{
+						Message:   regs[0],
+						Signature: params.BeaconConfig().ZeroHash[:],
+					},
+					{
+						Message:   regs[1],
+						Signature: params.BeaconConfig().ZeroHash[:],
+					},
+				},
+			}).
+			Return(nil, nil),
+
+		m.validatorClient.EXPECT().
+			SubmitValidatorRegistrations(gomock.Any(), &ethpb.SignedValidatorRegistrationsV1{
+				Messages: []*ethpb.SignedValidatorRegistrationV1{
+					{
+						Message:   regs[2],
+						Signature: params.BeaconConfig().ZeroHash[:],
+					},
+				},
+			}).
+			Return(nil, nil),
+	)
+
+	require.NoError(t, nil, SubmitValidatorRegistrations(
+		ctx, m.validatorClient,
+		[]*ethpb.SignedValidatorRegistrationV1{
+			{
+				Message:   regs[0],
+				Signature: params.BeaconConfig().ZeroHash[:],
 			},
-		}).
-		Return(nil, nil)
-	require.NoError(t, nil, SubmitValidatorRegistrations(ctx, m.validatorClient, []*ethpb.SignedValidatorRegistrationV1{
-		{Message: reg,
-			Signature: params.BeaconConfig().ZeroHash[:]},
-	}))
+			{
+				Message:   regs[1],
+				Signature: params.BeaconConfig().ZeroHash[:],
+			},
+			{
+				Message:   regs[2],
+				Signature: params.BeaconConfig().ZeroHash[:],
+			},
+		},
+		validatorRegsBatchSize,
+	))
 }
 
 func TestSubmitValidatorRegistration_CantSign(t *testing.T) {
@@ -49,6 +98,7 @@ func TestSubmitValidatorRegistration_CantSign(t *testing.T) {
 	defer finish()
 
 	ctx := context.Background()
+	validatorRegsBatchSize := 500
 	reg := &ethpb.ValidatorRegistrationV1{
 		FeeRecipient: bytesutil.PadTo([]byte("fee"), 20),
 		GasLimit:     123456,
@@ -67,7 +117,7 @@ func TestSubmitValidatorRegistration_CantSign(t *testing.T) {
 	require.ErrorContains(t, "could not sign", SubmitValidatorRegistrations(ctx, m.validatorClient, []*ethpb.SignedValidatorRegistrationV1{
 		{Message: reg,
 			Signature: params.BeaconConfig().ZeroHash[:]},
-	}))
+	}, validatorRegsBatchSize))
 }
 
 func Test_signValidatorRegistration(t *testing.T) {
@@ -109,7 +159,7 @@ func TestValidator_SignValidatorRegistrationRequest(t *testing.T) {
 			},
 			validatorSetter: func(t *testing.T) *validator {
 				v := validator{
-					pubkeyToValidatorIndex:       make(map[[fieldparams.BLSPubkeyLength]byte]types.ValidatorIndex),
+					pubkeyToValidatorIndex:       make(map[[fieldparams.BLSPubkeyLength]byte]primitives.ValidatorIndex),
 					signedValidatorRegistrations: make(map[[fieldparams.BLSPubkeyLength]byte]*ethpb.SignedValidatorRegistrationV1),
 					useWeb:                       false,
 					genesisTime:                  0,
@@ -137,7 +187,7 @@ func TestValidator_SignValidatorRegistrationRequest(t *testing.T) {
 			},
 			validatorSetter: func(t *testing.T) *validator {
 				v := validator{
-					pubkeyToValidatorIndex:       make(map[[fieldparams.BLSPubkeyLength]byte]types.ValidatorIndex),
+					pubkeyToValidatorIndex:       make(map[[fieldparams.BLSPubkeyLength]byte]primitives.ValidatorIndex),
 					signedValidatorRegistrations: make(map[[fieldparams.BLSPubkeyLength]byte]*ethpb.SignedValidatorRegistrationV1),
 					useWeb:                       false,
 					genesisTime:                  0,
@@ -165,7 +215,7 @@ func TestValidator_SignValidatorRegistrationRequest(t *testing.T) {
 			},
 			validatorSetter: func(t *testing.T) *validator {
 				v := validator{
-					pubkeyToValidatorIndex:       make(map[[fieldparams.BLSPubkeyLength]byte]types.ValidatorIndex),
+					pubkeyToValidatorIndex:       make(map[[fieldparams.BLSPubkeyLength]byte]primitives.ValidatorIndex),
 					signedValidatorRegistrations: make(map[[fieldparams.BLSPubkeyLength]byte]*ethpb.SignedValidatorRegistrationV1),
 					useWeb:                       false,
 					genesisTime:                  0,
@@ -193,7 +243,7 @@ func TestValidator_SignValidatorRegistrationRequest(t *testing.T) {
 			},
 			validatorSetter: func(t *testing.T) *validator {
 				v := validator{
-					pubkeyToValidatorIndex:       make(map[[fieldparams.BLSPubkeyLength]byte]types.ValidatorIndex),
+					pubkeyToValidatorIndex:       make(map[[fieldparams.BLSPubkeyLength]byte]primitives.ValidatorIndex),
 					signedValidatorRegistrations: make(map[[fieldparams.BLSPubkeyLength]byte]*ethpb.SignedValidatorRegistrationV1),
 					useWeb:                       false,
 					genesisTime:                  0,
@@ -222,6 +272,116 @@ func TestValidator_SignValidatorRegistrationRequest(t *testing.T) {
 				require.Equal(t, hexutil.Encode(got.Message.FeeRecipient), hexutil.Encode(tt.arg.FeeRecipient))
 				require.DeepEqual(t, got, v.signedValidatorRegistrations[bytesutil.ToBytes48(tt.arg.Pubkey)])
 			}
+		})
+	}
+}
+
+func TestChunkSignedValidatorRegistrationV1(t *testing.T) {
+	tests := map[string]struct {
+		regs      []*ethpb.SignedValidatorRegistrationV1
+		chunkSize int
+		expected  [][]*ethpb.SignedValidatorRegistrationV1
+	}{
+		"All buckets are full": {
+			regs: []*ethpb.SignedValidatorRegistrationV1{
+				{Signature: []byte("1")},
+				{Signature: []byte("2")},
+				{Signature: []byte("3")},
+				{Signature: []byte("4")},
+				{Signature: []byte("5")},
+				{Signature: []byte("6")},
+			},
+			chunkSize: 3,
+			expected: [][]*ethpb.SignedValidatorRegistrationV1{
+				{
+					{Signature: []byte("1")},
+					{Signature: []byte("2")},
+					{Signature: []byte("3")},
+				},
+				{
+					{Signature: []byte("4")},
+					{Signature: []byte("5")},
+					{Signature: []byte("6")},
+				},
+			},
+		},
+		"Last bucket is not full": {
+			regs: []*ethpb.SignedValidatorRegistrationV1{
+				{Signature: []byte("1")},
+				{Signature: []byte("2")},
+				{Signature: []byte("3")},
+				{Signature: []byte("4")},
+				{Signature: []byte("5")},
+				{Signature: []byte("6")},
+				{Signature: []byte("7")},
+			},
+			chunkSize: 3,
+			expected: [][]*ethpb.SignedValidatorRegistrationV1{
+				{
+					{Signature: []byte("1")},
+					{Signature: []byte("2")},
+					{Signature: []byte("3")},
+				},
+				{
+					{Signature: []byte("4")},
+					{Signature: []byte("5")},
+					{Signature: []byte("6")},
+				},
+				{
+					{Signature: []byte("7")},
+				},
+			},
+		},
+		"Not enough items": {
+			regs: []*ethpb.SignedValidatorRegistrationV1{
+				{Signature: []byte("1")},
+				{Signature: []byte("2")},
+				{Signature: []byte("3")},
+			},
+			chunkSize: 42,
+			expected: [][]*ethpb.SignedValidatorRegistrationV1{
+				{
+					{Signature: []byte("1")},
+					{Signature: []byte("2")},
+					{Signature: []byte("3")},
+				},
+			},
+		},
+		"Null chunk size": {
+			regs: []*ethpb.SignedValidatorRegistrationV1{
+				{Signature: []byte("1")},
+				{Signature: []byte("2")},
+				{Signature: []byte("3")},
+			},
+			chunkSize: 0,
+			expected: [][]*ethpb.SignedValidatorRegistrationV1{
+				{
+					{Signature: []byte("1")},
+					{Signature: []byte("2")},
+					{Signature: []byte("3")},
+				},
+			},
+		},
+		"Negative chunk size": {
+			regs: []*ethpb.SignedValidatorRegistrationV1{
+				{Signature: []byte("1")},
+				{Signature: []byte("2")},
+				{Signature: []byte("3")},
+			},
+			chunkSize: -1,
+			expected: [][]*ethpb.SignedValidatorRegistrationV1{
+				{
+					{Signature: []byte("1")},
+					{Signature: []byte("2")},
+					{Signature: []byte("3")},
+				},
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.DeepEqual(t, test.expected, chunkSignedValidatorRegistrationV1(test.regs, test.chunkSize))
 		})
 	}
 }

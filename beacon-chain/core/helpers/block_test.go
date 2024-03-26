@@ -5,13 +5,13 @@ import (
 	"math"
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
-	v1 "github.com/prysmaticlabs/prysm/v3/beacon-chain/state/v1"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v3/testing/assert"
-	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
+	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/testing/assert"
+	"github.com/prysmaticlabs/prysm/v5/testing/require"
 )
 
 func TestBlockRootAtSlot_CorrectBlockRoot(t *testing.T) {
@@ -25,8 +25,8 @@ func TestBlockRootAtSlot_CorrectBlockRoot(t *testing.T) {
 	}
 
 	tests := []struct {
-		slot         types.Slot
-		stateSlot    types.Slot
+		slot         primitives.Slot
+		stateSlot    primitives.Slot
 		expectedRoot [32]byte
 	}{
 		{
@@ -60,8 +60,10 @@ func TestBlockRootAtSlot_CorrectBlockRoot(t *testing.T) {
 	}
 	for i, tt := range tests {
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			helpers.ClearCache()
+
 			s.Slot = tt.stateSlot
-			state, err := v1.InitializeFromProto(s)
+			state, err := state_native.InitializeFromProtoPhase0(s)
 			require.NoError(t, err)
 			wantedSlot := tt.slot
 			result, err := helpers.BlockRootAtSlot(state, wantedSlot)
@@ -82,8 +84,8 @@ func TestBlockRootAtSlot_OutOfBounds(t *testing.T) {
 	}
 
 	tests := []struct {
-		slot        types.Slot
-		stateSlot   types.Slot
+		slot        primitives.Slot
+		stateSlot   primitives.Slot
 		expectedErr string
 	}{
 		{
@@ -110,8 +112,10 @@ func TestBlockRootAtSlot_OutOfBounds(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		helpers.ClearCache()
+
 		state.Slot = tt.stateSlot
-		s, err := v1.InitializeFromProto(state)
+		s, err := state_native.InitializeFromProtoPhase0(state)
 		require.NoError(t, err)
 		_, err = helpers.BlockRootAtSlot(s, tt.slot)
 		assert.ErrorContains(t, tt.expectedErr, err)

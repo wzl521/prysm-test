@@ -12,63 +12,38 @@ var (
 		Usage:  deprecatedUsage,
 		Hidden: true,
 	}
-	deprecatedBackupWebHookFlag = &cli.BoolFlag{
-		Name:   "enable-db-backup-webhook",
+	deprecatedEnableOptionalEngineMethods = &cli.BoolFlag{
+		Name:   "enable-optional-engine-methods",
 		Usage:  deprecatedUsage,
 		Hidden: true,
 	}
-	deprecatedBoltMmapFlag = &cli.StringFlag{
-		Name:   "bolt-mmap-initial-size",
+	deprecatedDisableBuildBlockParallel = &cli.BoolFlag{
+		Name:   "disable-build-block-parallel",
 		Usage:  deprecatedUsage,
 		Hidden: true,
 	}
-	deprecatedDisableDiscV5Flag = &cli.BoolFlag{
-		Name:   "disable-discv5",
+	deprecatedDisableReorgLateBlocks = &cli.BoolFlag{
+		Name:   "disable-reorg-late-blocks",
 		Usage:  deprecatedUsage,
 		Hidden: true,
 	}
-	deprecatedDisableAttHistoryCacheFlag = &cli.BoolFlag{
-		Name:   "disable-attesting-history-db-cache",
+	deprecatedDisableOptionalEngineMethods = &cli.BoolFlag{
+		Name:   "disable-optional-engine-methods",
 		Usage:  deprecatedUsage,
 		Hidden: true,
 	}
-	deprecatedEnableVectorizedHtr = &cli.BoolFlag{
-		Name:   "enable-vectorized-htr",
+	deprecatedDisableAggregateParallel = &cli.BoolFlag{
+		Name:   "disable-aggregate-parallel",
 		Usage:  deprecatedUsage,
 		Hidden: true,
 	}
-	deprecatedEnablePeerScorer = &cli.BoolFlag{
-		Name:   "enable-peer-scorer",
+	deprecatedEnableEIP4881 = &cli.BoolFlag{
+		Name:   "enable-eip-4881",
 		Usage:  deprecatedUsage,
 		Hidden: true,
 	}
-	deprecatedEnableForkchoiceDoublyLinkedTree = &cli.BoolFlag{
-		Name:   "enable-forkchoice-doubly-linked-tree",
-		Usage:  deprecatedUsage,
-		Hidden: true,
-	}
-	deprecatedDutyCountdown = &cli.BoolFlag{
-		Name:   "enable-duty-count-down",
-		Usage:  deprecatedUsage,
-		Hidden: true,
-	}
-	deprecatedHeadSync = &cli.BoolFlag{
-		Name:   "head-sync",
-		Usage:  deprecatedUsage,
-		Hidden: true,
-	}
-	deprecatedGossipBatchAggregation = &cli.BoolFlag{
-		Name:   "enable-gossip-batch-aggregation",
-		Usage:  deprecatedUsage,
-		Hidden: true,
-	}
-	deprecatedEnableLargerGossipHistory = &cli.BoolFlag{
-		Name:   "enable-larger-gossip-history",
-		Usage:  deprecatedUsage,
-		Hidden: true,
-	}
-	deprecatedFallbackProvider = &cli.StringFlag{
-		Name:   "fallback-web3provider",
+	deprecatedVerboseSigVerification = &cli.BoolFlag{
+		Name:   "enable-verbose-sig-verification",
 		Usage:  deprecatedUsage,
 		Hidden: true,
 	}
@@ -77,21 +52,15 @@ var (
 // Deprecated flags for both the beacon node and validator client.
 var deprecatedFlags = []cli.Flag{
 	exampleDeprecatedFeatureFlag,
-	deprecatedBoltMmapFlag,
-	deprecatedDisableDiscV5Flag,
-	deprecatedDisableAttHistoryCacheFlag,
-	deprecatedEnableVectorizedHtr,
-	deprecatedEnablePeerScorer,
-	deprecatedEnableForkchoiceDoublyLinkedTree,
-	deprecatedDutyCountdown,
-	deprecatedHeadSync,
-	deprecatedGossipBatchAggregation,
-	deprecatedEnableLargerGossipHistory,
-	deprecatedFallbackProvider,
+	deprecatedEnableOptionalEngineMethods,
+	deprecatedDisableBuildBlockParallel,
+	deprecatedDisableReorgLateBlocks,
+	deprecatedDisableOptionalEngineMethods,
+	deprecatedDisableAggregateParallel,
+	deprecatedEnableEIP4881,
+	deprecatedVerboseSigVerification,
 }
 
 // deprecatedBeaconFlags contains flags that are still used by other components
 // and therefore cannot be added to deprecatedFlags
-var deprecatedBeaconFlags = []cli.Flag{
-	deprecatedBackupWebHookFlag,
-}
+var deprecatedBeaconFlags []cli.Flag

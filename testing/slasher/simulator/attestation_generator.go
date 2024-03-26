@@ -1,24 +1,26 @@
 package simulator
 
 import (
+	"bytes"
 	"context"
 	"math"
 
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v3/crypto/rand"
-	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v3/time/slots"
+	"github.com/pkg/errors"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v5/crypto/rand"
+	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/time/slots"
 	"github.com/sirupsen/logrus"
 )
 
 func (s *Simulator) generateAttestationsForSlot(
-	ctx context.Context, slot types.Slot,
+	ctx context.Context, slot primitives.Slot,
 ) ([]*ethpb.IndexedAttestation, []*ethpb.AttesterSlashing, error) {
 	attestations := make([]*ethpb.IndexedAttestation, 0)
 	slashings := make([]*ethpb.AttesterSlashing, 0)
@@ -37,7 +39,7 @@ func (s *Simulator) generateAttestationsForSlot(
 	var slashedIndices []uint64
 	startIdx := valsPerSlot * uint64(slot%s.srvConfig.Params.SlotsPerEpoch)
 	endIdx := startIdx + valsPerCommittee
-	for c := types.CommitteeIndex(0); uint64(c) < committeesPerSlot; c++ {
+	for c := primitives.CommitteeIndex(0); uint64(c) < committeesPerSlot; c++ {
 		attData := &ethpb.AttestationData{
 			Slot:            slot,
 			CommitteeIndex:  c,
@@ -88,10 +90,31 @@ func (s *Simulator) generateAttestationsForSlot(
 				}
 				slashableAtt.Signature = aggSig.Marshal()
 				slashedIndices = append(slashedIndices, slashableAtt.AttestingIndices...)
-				slashings = append(slashings, &ethpb.AttesterSlashing{
+
+				attDataRoot, err := att.Data.HashTreeRoot()
+				if err != nil {
+					return nil, nil, errors.Wrap(err, "cannot compte `att` hash tree root")
+				}
+
+				slashableAttDataRoot, err := slashableAtt.Data.HashTreeRoot()
+				if err != nil {
+					return nil, nil, errors.Wrap(err, "cannot compte `slashableAtt` hash tree root")
+				}
+
+				slashing := &ethpb.AttesterSlashing{
 					Attestation_1: att,
 					Attestation_2: slashableAtt,
-				})
+				}
+
+				// Ensure the attestation with the lower data root is the first attestation.
+				if bytes.Compare(attDataRoot[:], slashableAttDataRoot[:]) > 0 {
+					slashing = &ethpb.AttesterSlashing{
+						Attestation_1: slashableAtt,
+						Attestation_2: att,
+					}
+				}
+
+				slashings = append(slashings, slashing)
 				attestations = append(attestations, slashableAtt)
 			}
 		}
@@ -108,7 +131,7 @@ func (s *Simulator) generateAttestationsForSlot(
 }
 
 func (s *Simulator) aggregateSigForAttestation(
-	beaconState state.BeaconState, att *ethpb.IndexedAttestation,
+	beaconState state.ReadOnlyBeaconState, att *ethpb.IndexedAttestation,
 ) (bls.Signature, error) {
 	domain, err := signing.Domain(
 		beaconState.Fork(),
@@ -125,7 +148,7 @@ func (s *Simulator) aggregateSigForAttestation(
 	}
 	sigs := make([]bls.Signature, len(att.AttestingIndices))
 	for i, validatorIndex := range att.AttestingIndices {
-		privKey := s.srvConfig.PrivateKeysByValidatorIndex[types.ValidatorIndex(validatorIndex)]
+		privKey := s.srvConfig.PrivateKeysByValidatorIndex[primitives.ValidatorIndex(validatorIndex)]
 		sigs[i] = privKey.Sign(signingRoot[:])
 	}
 	return bls.AggregateSignatures(sigs), nil

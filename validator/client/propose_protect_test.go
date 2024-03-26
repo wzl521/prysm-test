@@ -4,24 +4,21 @@ import (
 	"context"
 	"testing"
 
-	"github.com/golang/mock/gomock"
-	"github.com/prysmaticlabs/prysm/v3/config/features"
-	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v3/testing/require"
-	"github.com/prysmaticlabs/prysm/v3/testing/util"
+	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/testing/require"
+	"github.com/prysmaticlabs/prysm/v5/testing/util"
 )
 
 func Test_slashableProposalCheck_PreventsLowerThanMinProposal(t *testing.T) {
 	ctx := context.Background()
 	validator, _, validatorKey, finish := setup(t)
 	defer finish()
-	lowestSignedSlot := types.Slot(10)
-	pubKeyBytes := [fieldparams.BLSPubkeyLength]byte{}
+	lowestSignedSlot := primitives.Slot(10)
+	var pubKeyBytes [fieldparams.BLSPubkeyLength]byte
 	copy(pubKeyBytes[:], validatorKey.PublicKey().Marshal())
 
 	// We save a proposal at the lowest signed slot in the DB.
@@ -42,7 +39,7 @@ func Test_slashableProposalCheck_PreventsLowerThanMinProposal(t *testing.T) {
 	wsb, err := blocks.NewSignedBeaconBlock(blk)
 	require.NoError(t, err)
 	err = validator.slashableProposalCheck(context.Background(), pubKeyBytes, wsb, [32]byte{4})
-	require.ErrorContains(t, "could not sign block with slot <= lowest signed", err)
+	require.ErrorContains(t, "could not sign block with slot < lowest signed", err)
 
 	// We expect the same block with a slot equal to the lowest
 	// signed slot to pass validation if signing roots are equal.
@@ -64,7 +61,7 @@ func Test_slashableProposalCheck_PreventsLowerThanMinProposal(t *testing.T) {
 	wsb, err = blocks.NewSignedBeaconBlock(blk)
 	require.NoError(t, err)
 	err = validator.slashableProposalCheck(context.Background(), pubKeyBytes, wsb, [32]byte{4})
-	require.ErrorContains(t, failedBlockSignLocalErr, err)
+	require.ErrorContains(t, "could not sign block with slot == lowest signed", err)
 
 	// We expect the same block with a slot > than the lowest
 	// signed slot to pass validation.
@@ -85,12 +82,7 @@ func Test_slashableProposalCheck_PreventsLowerThanMinProposal(t *testing.T) {
 
 func Test_slashableProposalCheck(t *testing.T) {
 	ctx := context.Background()
-	config := &features.Flags{
-		RemoteSlasherProtection: true,
-	}
-	reset := features.InitWithReset(config)
-	defer reset()
-	validator, mocks, validatorKey, finish := setup(t)
+	validator, _, validatorKey, finish := setup(t)
 	defer finish()
 
 	blk := util.HydrateSignedBeaconBlock(&ethpb.SignedBeaconBlock{
@@ -102,7 +94,7 @@ func Test_slashableProposalCheck(t *testing.T) {
 		Signature: params.BeaconConfig().EmptySignature[:],
 	})
 
-	pubKeyBytes := [fieldparams.BLSPubkeyLength]byte{}
+	var pubKeyBytes [fieldparams.BLSPubkeyLength]byte
 	copy(pubKeyBytes[:], validatorKey.PublicKey().Marshal())
 
 	// We save a proposal at slot 1 as our lowest proposal.
@@ -113,17 +105,10 @@ func Test_slashableProposalCheck(t *testing.T) {
 	dummySigningRoot := [32]byte{1}
 	err = validator.db.SaveProposalHistoryForSlot(ctx, pubKeyBytes, 10, dummySigningRoot[:])
 	require.NoError(t, err)
-	pubKey := [fieldparams.BLSPubkeyLength]byte{}
+	var pubKey [fieldparams.BLSPubkeyLength]byte
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
 	sBlock, err := blocks.NewSignedBeaconBlock(blk)
 	require.NoError(t, err)
-	blockHdr, err := interfaces.SignedBeaconBlockHeaderFromBlockInterface(sBlock)
-	require.NoError(t, err)
-
-	mocks.slasherClient.EXPECT().IsSlashableBlock(
-		gomock.Any(), // ctx
-		blockHdr,
-	).Return(&ethpb.ProposerSlashingResponse{}, nil /*err*/)
 
 	// We expect the same block sent out with the same root should not be slasahble.
 	err = validator.slashableProposalCheck(context.Background(), pubKey, sBlock, dummySigningRoot)
@@ -150,45 +135,20 @@ func Test_slashableProposalCheck(t *testing.T) {
 	blk.Block.Slot = 9
 	sBlock, err = blocks.NewSignedBeaconBlock(blk)
 	require.NoError(t, err)
-	blockHdr, err = interfaces.SignedBeaconBlockHeaderFromBlockInterface(sBlock)
-	require.NoError(t, err)
-	mocks.slasherClient.EXPECT().IsSlashableBlock(
-		gomock.Any(), // ctx
-		blockHdr,
-	).Return(&ethpb.ProposerSlashingResponse{}, nil /*err*/)
 	err = validator.slashableProposalCheck(context.Background(), pubKey, sBlock, [32]byte{3})
 	require.NoError(t, err, "Expected allowed block not to throw error")
 }
 
 func Test_slashableProposalCheck_RemoteProtection(t *testing.T) {
-	config := &features.Flags{
-		RemoteSlasherProtection: true,
-	}
-	reset := features.InitWithReset(config)
-	defer reset()
-	validator, m, validatorKey, finish := setup(t)
+	validator, _, validatorKey, finish := setup(t)
 	defer finish()
-	pubKey := [fieldparams.BLSPubkeyLength]byte{}
+	var pubKey [fieldparams.BLSPubkeyLength]byte
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
 
 	blk := util.NewBeaconBlock()
 	blk.Block.Slot = 10
 	sBlock, err := blocks.NewSignedBeaconBlock(blk)
 	require.NoError(t, err)
-	blockHdr, err := interfaces.SignedBeaconBlockHeaderFromBlockInterface(sBlock)
-	require.NoError(t, err)
-	m.slasherClient.EXPECT().IsSlashableBlock(
-		gomock.Any(), // ctx
-		blockHdr,
-	).Return(&ethpb.ProposerSlashingResponse{ProposerSlashings: []*ethpb.ProposerSlashing{{}}}, nil /*err*/)
-
-	err = validator.slashableProposalCheck(context.Background(), pubKey, sBlock, [32]byte{2})
-	require.ErrorContains(t, failedBlockSignExternalErr, err)
-
-	m.slasherClient.EXPECT().IsSlashableBlock(
-		gomock.Any(), // ctx
-		blockHdr,
-	).Return(&ethpb.ProposerSlashingResponse{}, nil /*err*/)
 
 	err = validator.slashableProposalCheck(context.Background(), pubKey, sBlock, [32]byte{2})
 	require.NoError(t, err, "Expected allowed block not to throw error")

@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
-	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v3/time/slots"
+	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/v5/time/slots"
 	bolt "go.etcd.io/bbolt"
 	"go.opencensus.io/trace"
 )
@@ -21,20 +21,20 @@ type ProposalHistoryForPubkey struct {
 
 // Proposal representation for a validator public key.
 type Proposal struct {
-	Slot        types.Slot `json:"slot"`
-	SigningRoot []byte     `json:"signing_root"`
+	Slot        primitives.Slot `json:"slot"`
+	SigningRoot []byte          `json:"signing_root"`
 }
 
 // ProposedPublicKeys retrieves all public keys in our proposals history bucket.
 func (s *Store) ProposedPublicKeys(ctx context.Context) ([][fieldparams.BLSPubkeyLength]byte, error) {
-	ctx, span := trace.StartSpan(ctx, "Validator.ProposedPublicKeys")
+	_, span := trace.StartSpan(ctx, "Validator.ProposedPublicKeys")
 	defer span.End()
 	var err error
 	proposedPublicKeys := make([][fieldparams.BLSPubkeyLength]byte, 0)
 	err = s.view(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(historicProposalsBucket)
 		return bucket.ForEach(func(key []byte, _ []byte) error {
-			pubKeyBytes := [fieldparams.BLSPubkeyLength]byte{}
+			var pubKeyBytes [fieldparams.BLSPubkeyLength]byte
 			copy(pubKeyBytes[:], key)
 			proposedPublicKeys = append(proposedPublicKeys, pubKeyBytes)
 			return nil
@@ -44,35 +44,47 @@ func (s *Store) ProposedPublicKeys(ctx context.Context) ([][fieldparams.BLSPubke
 }
 
 // ProposalHistoryForSlot accepts a validator public key and returns the corresponding signing root as well
-// as a boolean that tells us if we have a proposal history stored at the slot. It is possible we have proposed
-// a slot but stored a nil signing root, so the boolean helps give full information.
-func (s *Store) ProposalHistoryForSlot(ctx context.Context, publicKey [fieldparams.BLSPubkeyLength]byte, slot types.Slot) ([32]byte, bool, error) {
-	ctx, span := trace.StartSpan(ctx, "Validator.ProposalHistoryForSlot")
+// as a boolean that tells us if we have a proposal history stored at the slot and a boolean that tells us if we have
+// a signed root at the slot.
+func (s *Store) ProposalHistoryForSlot(ctx context.Context, publicKey [fieldparams.BLSPubkeyLength]byte, slot primitives.Slot) ([32]byte, bool, bool, error) {
+	_, span := trace.StartSpan(ctx, "Validator.ProposalHistoryForSlot")
 	defer span.End()
 
-	var err error
-	var proposalExists bool
-	signingRoot := [32]byte{}
+	var (
+		err                               error
+		proposalExists, signingRootExists bool
+		signingRoot                       [32]byte
+	)
+
 	err = s.view(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(historicProposalsBucket)
 		valBucket := bucket.Bucket(publicKey[:])
 		if valBucket == nil {
 			return nil
 		}
+
 		signingRootBytes := valBucket.Get(bytesutil.SlotToBytesBigEndian(slot))
 		if signingRootBytes == nil {
 			return nil
 		}
+
+		// If we are at this point, we are sure we have a proposal history for the slot.
 		proposalExists = true
+		if len(signingRootBytes) == 0 {
+			return nil
+		}
+
+		// If we are at this point, we are sure we have a signing root for the slot.
+		signingRootExists = true
 		copy(signingRoot[:], signingRootBytes)
 		return nil
 	})
-	return signingRoot, proposalExists, err
+	return signingRoot, proposalExists, signingRootExists, err
 }
 
 // ProposalHistoryForPubKey returns the entire proposal history for a given public key.
 func (s *Store) ProposalHistoryForPubKey(ctx context.Context, publicKey [fieldparams.BLSPubkeyLength]byte) ([]*Proposal, error) {
-	ctx, span := trace.StartSpan(ctx, "Validator.ProposalHistoryForPubKey")
+	_, span := trace.StartSpan(ctx, "Validator.ProposalHistoryForPubKey")
 	defer span.End()
 
 	proposals := make([]*Proposal, 0)
@@ -99,8 +111,8 @@ func (s *Store) ProposalHistoryForPubKey(ctx context.Context, publicKey [fieldpa
 // SaveProposalHistoryForSlot saves the proposal history for the requested validator public key.
 // We also check if the incoming proposal slot is lower than the lowest signed proposal slot
 // for the validator and override its value on disk.
-func (s *Store) SaveProposalHistoryForSlot(ctx context.Context, pubKey [fieldparams.BLSPubkeyLength]byte, slot types.Slot, signingRoot []byte) error {
-	ctx, span := trace.StartSpan(ctx, "Validator.SaveProposalHistoryForEpoch")
+func (s *Store) SaveProposalHistoryForSlot(ctx context.Context, pubKey [fieldparams.BLSPubkeyLength]byte, slot primitives.Slot, signingRoot []byte) error {
+	_, span := trace.StartSpan(ctx, "Validator.SaveProposalHistoryForEpoch")
 	defer span.End()
 
 	err := s.update(func(tx *bolt.Tx) error {
@@ -113,7 +125,7 @@ func (s *Store) SaveProposalHistoryForSlot(ctx context.Context, pubKey [fieldpar
 		// If the incoming slot is lower than the lowest signed proposal slot, override.
 		lowestSignedBkt := tx.Bucket(lowestSignedProposalsBucket)
 		lowestSignedProposalBytes := lowestSignedBkt.Get(pubKey[:])
-		var lowestSignedProposalSlot types.Slot
+		var lowestSignedProposalSlot primitives.Slot
 		if len(lowestSignedProposalBytes) >= 8 {
 			lowestSignedProposalSlot = bytesutil.BytesToSlotBigEndian(lowestSignedProposalBytes)
 		}
@@ -126,7 +138,7 @@ func (s *Store) SaveProposalHistoryForSlot(ctx context.Context, pubKey [fieldpar
 		// If the incoming slot is higher than the highest signed proposal slot, override.
 		highestSignedBkt := tx.Bucket(highestSignedProposalsBucket)
 		highestSignedProposalBytes := highestSignedBkt.Get(pubKey[:])
-		var highestSignedProposalSlot types.Slot
+		var highestSignedProposalSlot primitives.Slot
 		if len(highestSignedProposalBytes) >= 8 {
 			highestSignedProposalSlot = bytesutil.BytesToSlotBigEndian(highestSignedProposalBytes)
 		}
@@ -146,12 +158,12 @@ func (s *Store) SaveProposalHistoryForSlot(ctx context.Context, pubKey [fieldpar
 
 // LowestSignedProposal returns the lowest signed proposal slot for a validator public key.
 // If no data exists, a boolean of value false is returned.
-func (s *Store) LowestSignedProposal(ctx context.Context, publicKey [fieldparams.BLSPubkeyLength]byte) (types.Slot, bool, error) {
-	ctx, span := trace.StartSpan(ctx, "Validator.LowestSignedProposal")
+func (s *Store) LowestSignedProposal(ctx context.Context, publicKey [fieldparams.BLSPubkeyLength]byte) (primitives.Slot, bool, error) {
+	_, span := trace.StartSpan(ctx, "Validator.LowestSignedProposal")
 	defer span.End()
 
 	var err error
-	var lowestSignedProposalSlot types.Slot
+	var lowestSignedProposalSlot primitives.Slot
 	var exists bool
 	err = s.view(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(lowestSignedProposalsBucket)
@@ -169,12 +181,12 @@ func (s *Store) LowestSignedProposal(ctx context.Context, publicKey [fieldparams
 
 // HighestSignedProposal returns the highest signed proposal slot for a validator public key.
 // If no data exists, a boolean of value false is returned.
-func (s *Store) HighestSignedProposal(ctx context.Context, publicKey [fieldparams.BLSPubkeyLength]byte) (types.Slot, bool, error) {
-	ctx, span := trace.StartSpan(ctx, "Validator.HighestSignedProposal")
+func (s *Store) HighestSignedProposal(ctx context.Context, publicKey [fieldparams.BLSPubkeyLength]byte) (primitives.Slot, bool, error) {
+	_, span := trace.StartSpan(ctx, "Validator.HighestSignedProposal")
 	defer span.End()
 
 	var err error
-	var highestSignedProposalSlot types.Slot
+	var highestSignedProposalSlot primitives.Slot
 	var exists bool
 	err = s.view(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(highestSignedProposalsBucket)
@@ -190,7 +202,7 @@ func (s *Store) HighestSignedProposal(ctx context.Context, publicKey [fieldparam
 	return highestSignedProposalSlot, exists, err
 }
 
-func pruneProposalHistoryBySlot(valBucket *bolt.Bucket, newestSlot types.Slot) error {
+func pruneProposalHistoryBySlot(valBucket *bolt.Bucket, newestSlot primitives.Slot) error {
 	c := valBucket.Cursor()
 	for k, _ := c.First(); k != nil; k, _ = c.First() {
 		slot := bytesutil.BytesToSlotBigEndian(k)

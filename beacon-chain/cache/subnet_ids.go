@@ -6,10 +6,10 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/patrickmn/go-cache"
-	lruwrpr "github.com/prysmaticlabs/prysm/v3/cache/lru"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v3/container/slice"
+	lruwrpr "github.com/prysmaticlabs/prysm/v5/cache/lru"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/container/slice"
 )
 
 type subnetIDs struct {
@@ -24,6 +24,8 @@ type subnetIDs struct {
 // SubnetIDs for attester and aggregator.
 var SubnetIDs = newSubnetIDs()
 
+var subnetKey = "persistent-subnets"
+
 func newSubnetIDs() *subnetIDs {
 	// Given a node can calculate committee assignments of current epoch and next epoch.
 	// Max size is set to 2 epoch length.
@@ -37,7 +39,7 @@ func newSubnetIDs() *subnetIDs {
 }
 
 // AddAttesterSubnetID adds the subnet index for subscribing subnet for the attester of a given slot.
-func (s *subnetIDs) AddAttesterSubnetID(slot types.Slot, subnetID uint64) {
+func (s *subnetIDs) AddAttesterSubnetID(slot primitives.Slot, subnetID uint64) {
 	s.attesterLock.Lock()
 	defer s.attesterLock.Unlock()
 
@@ -50,7 +52,7 @@ func (s *subnetIDs) AddAttesterSubnetID(slot types.Slot, subnetID uint64) {
 }
 
 // GetAttesterSubnetIDs gets the subnet IDs for subscribed subnets for attesters of the slot.
-func (s *subnetIDs) GetAttesterSubnetIDs(slot types.Slot) []uint64 {
+func (s *subnetIDs) GetAttesterSubnetIDs(slot primitives.Slot) []uint64 {
 	s.attesterLock.RLock()
 	defer s.attesterLock.RUnlock()
 
@@ -65,7 +67,7 @@ func (s *subnetIDs) GetAttesterSubnetIDs(slot types.Slot) []uint64 {
 }
 
 // AddAggregatorSubnetID adds the subnet ID for subscribing subnet for the aggregator of a given slot.
-func (s *subnetIDs) AddAggregatorSubnetID(slot types.Slot, subnetID uint64) {
+func (s *subnetIDs) AddAggregatorSubnetID(slot primitives.Slot, subnetID uint64) {
 	s.aggregatorLock.Lock()
 	defer s.aggregatorLock.Unlock()
 
@@ -78,7 +80,7 @@ func (s *subnetIDs) AddAggregatorSubnetID(slot types.Slot, subnetID uint64) {
 }
 
 // GetAggregatorSubnetIDs gets the subnet IDs for subscribing subnet for aggregator of the slot.
-func (s *subnetIDs) GetAggregatorSubnetIDs(slot types.Slot) []uint64 {
+func (s *subnetIDs) GetAggregatorSubnetIDs(slot primitives.Slot) []uint64 {
 	s.aggregatorLock.RLock()
 	defer s.aggregatorLock.RUnlock()
 
@@ -91,11 +93,11 @@ func (s *subnetIDs) GetAggregatorSubnetIDs(slot types.Slot) []uint64 {
 
 // GetPersistentSubnets retrieves the persistent subnet and expiration time of that validator's
 // subscription.
-func (s *subnetIDs) GetPersistentSubnets(pubkey []byte) ([]uint64, bool, time.Time) {
+func (s *subnetIDs) GetPersistentSubnets() ([]uint64, bool, time.Time) {
 	s.subnetsLock.RLock()
 	defer s.subnetsLock.RUnlock()
 
-	id, duration, ok := s.persistentSubnets.GetWithExpiration(string(pubkey))
+	id, duration, ok := s.persistentSubnets.GetWithExpiration(subnetKey)
 	if !ok {
 		return []uint64{}, ok, time.Time{}
 	}
@@ -122,11 +124,11 @@ func (s *subnetIDs) GetAllSubnets() []uint64 {
 
 // AddPersistentCommittee adds the relevant committee for that particular validator along with its
 // expiration period.
-func (s *subnetIDs) AddPersistentCommittee(pubkey []byte, comIndex []uint64, duration time.Duration) {
+func (s *subnetIDs) AddPersistentCommittee(comIndex []uint64, duration time.Duration) {
 	s.subnetsLock.Lock()
 	defer s.subnetsLock.Unlock()
 
-	s.persistentSubnets.Set(string(pubkey), comIndex, duration)
+	s.persistentSubnets.Set(subnetKey, comIndex, duration)
 }
 
 // EmptyAllCaches empties out all the related caches and flushes any stored

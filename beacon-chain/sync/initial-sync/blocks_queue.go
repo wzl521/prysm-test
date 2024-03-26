@@ -5,13 +5,14 @@ import (
 	"errors"
 	"time"
 
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/p2p"
-	beaconsync "github.com/prysmaticlabs/prysm/v3/beacon-chain/sync"
-	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v3/time/slots"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
+	beaconsync "github.com/prysmaticlabs/prysm/v5/beacon-chain/sync"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/time/slots"
 	"github.com/sirupsen/logrus"
 )
 
@@ -28,7 +29,7 @@ const (
 	skippedMachineTimeout = 10 * staleEpochTimeout
 	// lookaheadSteps is a limit on how many forward steps are loaded into queue.
 	// Each step is managed by assigned finite state machine. Must be >= 2.
-	lookaheadSteps = 8
+	lookaheadSteps = 4
 	// noRequiredPeersErrMaxRetries defines number of retries when no required peers are found.
 	noRequiredPeersErrMaxRetries = 1000
 	// noRequiredPeersErrRefreshInterval defines interval for which queue will be paused before
@@ -62,7 +63,9 @@ type syncMode uint8
 type blocksQueueConfig struct {
 	blocksFetcher       *blocksFetcher
 	chain               blockchainService
-	highestExpectedSlot types.Slot
+	clock               *startup.Clock
+	ctxMap              beaconsync.ContextByteVersions
+	highestExpectedSlot primitives.Slot
 	p2p                 p2p.P2P
 	db                  db.ReadOnlyDatabase
 	mode                syncMode
@@ -76,20 +79,20 @@ type blocksQueue struct {
 	smm                 *stateMachineManager
 	blocksFetcher       *blocksFetcher
 	chain               blockchainService
-	highestExpectedSlot types.Slot
+	highestExpectedSlot primitives.Slot
 	mode                syncMode
 	exitConditions      struct {
 		noRequiredPeersErrRetries int
 	}
 	fetchedData chan *blocksQueueFetchedData // output channel for ready blocks
-	staleEpochs map[types.Epoch]uint8        // counter to keep track of stale FSMs
+	staleEpochs map[primitives.Epoch]uint8   // counter to keep track of stale FSMs
 	quit        chan struct{}                // termination notifier
 }
 
 // blocksQueueFetchedData is a data container that is returned from a queue on each step.
 type blocksQueueFetchedData struct {
-	pid    peer.ID
-	blocks []interfaces.SignedBeaconBlock
+	pid peer.ID
+	bwb []blocks.BlockWithROBlobs
 }
 
 // newBlocksQueue creates initialized priority queue.
@@ -99,9 +102,11 @@ func newBlocksQueue(ctx context.Context, cfg *blocksQueueConfig) *blocksQueue {
 	blocksFetcher := cfg.blocksFetcher
 	if blocksFetcher == nil {
 		blocksFetcher = newBlocksFetcher(ctx, &blocksFetcherConfig{
-			chain: cfg.chain,
-			p2p:   cfg.p2p,
-			db:    cfg.db,
+			ctxMap: cfg.ctxMap,
+			chain:  cfg.chain,
+			p2p:    cfg.p2p,
+			db:     cfg.db,
+			clock:  cfg.clock,
 		})
 	}
 	highestExpectedSlot := cfg.highestExpectedSlot
@@ -125,7 +130,7 @@ func newBlocksQueue(ctx context.Context, cfg *blocksQueueConfig) *blocksQueue {
 		mode:                cfg.mode,
 		fetchedData:         make(chan *blocksQueueFetchedData, 1),
 		quit:                make(chan struct{}),
-		staleEpochs:         make(map[types.Epoch]uint8),
+		staleEpochs:         make(map[primitives.Epoch]uint8),
 	}
 
 	// Configure state machines.
@@ -179,8 +184,8 @@ func (q *blocksQueue) loop() {
 	if startSlot > startBackSlots {
 		startSlot -= startBackSlots
 	}
-	blocksPerRequest := q.blocksFetcher.blocksPerSecond
-	for i := startSlot; i < startSlot.Add(blocksPerRequest*lookaheadSteps); i += types.Slot(blocksPerRequest) {
+	blocksPerRequest := q.blocksFetcher.blocksPerPeriod
+	for i := startSlot; i < startSlot.Add(blocksPerRequest*lookaheadSteps); i += primitives.Slot(blocksPerRequest) {
 		q.smm.addStateMachine(i)
 	}
 
@@ -294,7 +299,7 @@ func (q *blocksQueue) onScheduleEvent(ctx context.Context) eventHandlerFn {
 			m.setState(stateSkipped)
 			return m.state, errSlotIsTooHigh
 		}
-		blocksPerRequest := q.blocksFetcher.blocksPerSecond
+		blocksPerRequest := q.blocksFetcher.blocksPerPeriod
 		if err := q.blocksFetcher.scheduleRequest(ctx, m.start, blocksPerRequest); err != nil {
 			return m.state, err
 		}
@@ -316,15 +321,15 @@ func (q *blocksQueue) onDataReceivedEvent(ctx context.Context) eventHandlerFn {
 			return m.state, errInputNotFetchRequestParams
 		}
 		if response.err != nil {
-			switch response.err {
-			case errSlotIsTooHigh:
+			if errors.Is(response.err, errSlotIsTooHigh) {
 				// Current window is already too big, re-request previous epochs.
 				for _, fsm := range q.smm.machines {
 					if fsm.start < response.start && fsm.state == stateSkipped {
 						fsm.setState(stateNew)
 					}
 				}
-			case beaconsync.ErrInvalidFetchedData:
+			}
+			if errors.Is(response.err, beaconsync.ErrInvalidFetchedData) {
 				// Peer returned invalid data, penalize.
 				q.blocksFetcher.p2p.Peers().Scorers().BadResponsesScorer().Increment(m.pid)
 				log.WithField("pid", response.pid).Debug("Peer is penalized for invalid blocks")
@@ -332,7 +337,7 @@ func (q *blocksQueue) onDataReceivedEvent(ctx context.Context) eventHandlerFn {
 			return m.state, response.err
 		}
 		m.pid = response.pid
-		m.blocks = response.blocks
+		m.bwb = response.bwb
 		return stateDataParsed, nil
 	}
 }
@@ -347,14 +352,14 @@ func (q *blocksQueue) onReadyToSendEvent(ctx context.Context) eventHandlerFn {
 			return m.state, errInvalidInitialState
 		}
 
-		if len(m.blocks) == 0 {
+		if len(m.bwb) == 0 {
 			return stateSkipped, nil
 		}
 
 		send := func() (stateID, error) {
 			data := &blocksQueueFetchedData{
-				pid:    m.pid,
-				blocks: m.blocks,
+				pid: m.pid,
+				bwb: m.bwb,
 			}
 			select {
 			case <-ctx.Done():

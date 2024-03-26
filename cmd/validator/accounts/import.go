@@ -4,14 +4,13 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v3/cmd"
-	"github.com/prysmaticlabs/prysm/v3/cmd/validator/flags"
-	"github.com/prysmaticlabs/prysm/v3/validator/accounts"
-	"github.com/prysmaticlabs/prysm/v3/validator/accounts/iface"
-	"github.com/prysmaticlabs/prysm/v3/validator/accounts/userprompt"
-	"github.com/prysmaticlabs/prysm/v3/validator/accounts/wallet"
-	"github.com/prysmaticlabs/prysm/v3/validator/client"
-	"github.com/prysmaticlabs/prysm/v3/validator/keymanager"
+	"github.com/prysmaticlabs/prysm/v5/cmd"
+	"github.com/prysmaticlabs/prysm/v5/cmd/validator/flags"
+	"github.com/prysmaticlabs/prysm/v5/validator/accounts"
+	"github.com/prysmaticlabs/prysm/v5/validator/accounts/iface"
+	"github.com/prysmaticlabs/prysm/v5/validator/accounts/userprompt"
+	"github.com/prysmaticlabs/prysm/v5/validator/accounts/wallet"
+	"github.com/prysmaticlabs/prysm/v5/validator/client"
 	"github.com/urfave/cli/v2"
 )
 
@@ -38,6 +37,7 @@ func accountsImport(c *cli.Context) error {
 		accounts.WithKeymanager(km),
 		accounts.WithGRPCDialOpts(dialOpts),
 		accounts.WithBeaconRPCProvider(c.String(flags.BeaconRPCProviderFlag.Name)),
+		accounts.WithBeaconRESTApiProvider(c.String(flags.BeaconRESTApiProviderFlag.Name)),
 		accounts.WithGRPCHeaders(grpcHeaders),
 	}
 
@@ -60,54 +60,5 @@ func accountsImport(c *cli.Context) error {
 }
 
 func walletImport(c *cli.Context) (*wallet.Wallet, error) {
-	return wallet.OpenWalletOrElseCli(c, func(cliCtx *cli.Context) (*wallet.Wallet, error) {
-		walletDir, err := userprompt.InputDirectory(cliCtx, userprompt.WalletDirPromptText, flags.WalletDirFlag)
-		if err != nil {
-			return nil, err
-		}
-		exists, err := wallet.Exists(walletDir)
-		if err != nil {
-			return nil, errors.Wrap(err, wallet.CheckExistsErrMsg)
-		}
-		if exists {
-			isValid, err := wallet.IsValid(walletDir)
-			if err != nil {
-				return nil, errors.Wrap(err, wallet.CheckValidityErrMsg)
-			}
-			if !isValid {
-				return nil, errors.New(wallet.InvalidWalletErrMsg)
-			}
-			walletPassword, err := wallet.InputPassword(
-				cliCtx,
-				flags.WalletPasswordFileFlag,
-				wallet.PasswordPromptText,
-				false, /* Do not confirm password */
-				wallet.ValidateExistingPass,
-			)
-			if err != nil {
-				return nil, err
-			}
-			return wallet.OpenWallet(cliCtx.Context, &wallet.Config{
-				WalletDir:      walletDir,
-				WalletPassword: walletPassword,
-			})
-		}
-
-		cfg, err := accounts.ExtractWalletCreationConfigFromCli(cliCtx, keymanager.Local)
-		if err != nil {
-			return nil, err
-		}
-		w := wallet.New(&wallet.Config{
-			KeymanagerKind: cfg.WalletCfg.KeymanagerKind,
-			WalletDir:      cfg.WalletCfg.WalletDir,
-			WalletPassword: cfg.WalletCfg.WalletPassword,
-		})
-		if err = accounts.CreateLocalKeymanagerWallet(cliCtx.Context, w); err != nil {
-			return nil, errors.Wrap(err, "could not create keymanager")
-		}
-		log.WithField("wallet-path", cfg.WalletCfg.WalletDir).Info(
-			"Successfully created new wallet",
-		)
-		return w, nil
-	})
+	return wallet.OpenWalletOrElseCli(c, wallet.OpenOrCreateNewWallet)
 }

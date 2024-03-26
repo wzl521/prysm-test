@@ -14,10 +14,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	prombolt "github.com/prysmaticlabs/prombbolt"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/db/iface"
-	"github.com/prysmaticlabs/prysm/v3/config/features"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	"github.com/prysmaticlabs/prysm/v3/io/file"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db/iface"
+	"github.com/prysmaticlabs/prysm/v5/config/features"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
+	"github.com/prysmaticlabs/prysm/v5/io/file"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -91,17 +92,54 @@ type Store struct {
 	ctx                 context.Context
 }
 
-// KVStoreDatafilePath is the canonical construction of a full
+// StoreDatafilePath is the canonical construction of a full
 // database file path from the directory path, so that code outside
 // this package can find the full path in a consistent way.
-func KVStoreDatafilePath(dirPath string) string {
+func StoreDatafilePath(dirPath string) string {
 	return path.Join(dirPath, DatabaseFileName)
 }
+
+var Buckets = [][]byte{
+	attestationsBucket,
+	blocksBucket,
+	stateBucket,
+	proposerSlashingsBucket,
+	attesterSlashingsBucket,
+	voluntaryExitsBucket,
+	chainMetadataBucket,
+	checkpointBucket,
+	powchainBucket,
+	stateSummaryBucket,
+	stateValidatorsBucket,
+	// Indices buckets.
+	attestationHeadBlockRootBucket,
+	attestationSourceRootIndicesBucket,
+	attestationSourceEpochIndicesBucket,
+	attestationTargetRootIndicesBucket,
+	attestationTargetEpochIndicesBucket,
+	blockSlotIndicesBucket,
+	stateSlotIndicesBucket,
+	blockParentRootIndicesBucket,
+	finalizedBlockRootsIndexBucket,
+	blockRootValidatorHashesBucket,
+	// State management service bucket.
+	newStateServiceCompatibleBucket,
+	// Migrations
+	migrationsBucket,
+
+	feeRecipientBucket,
+	registrationBucket,
+
+	blobsBucket,
+}
+
+// KVStoreOption is a functional option that modifies a kv.Store.
+type KVStoreOption func(*Store)
 
 // NewKVStore initializes a new boltDB key-value store at the directory
 // path specified, creates the kv-buckets based on the schema, and stores
 // an open connection db object as a property of the Store struct.
-func NewKVStore(ctx context.Context, dirPath string) (*Store, error) {
+func NewKVStore(ctx context.Context, dirPath string, opts ...KVStoreOption) (*Store, error) {
 	hasDir, err := file.HasDir(dirPath)
 	if err != nil {
 		return nil, err
@@ -111,7 +149,7 @@ func NewKVStore(ctx context.Context, dirPath string) (*Store, error) {
 			return nil, err
 		}
 	}
-	datafile := KVStoreDatafilePath(dirPath)
+	datafile := StoreDatafilePath(dirPath)
 	log.Infof("Opening Bolt DB at %s", datafile)
 	boltDB, err := bolt.Open(
 		datafile,
@@ -154,53 +192,30 @@ func NewKVStore(ctx context.Context, dirPath string) (*Store, error) {
 		stateSummaryCache:   newStateSummaryCache(),
 		ctx:                 ctx,
 	}
+	for _, o := range opts {
+		o(kv)
+	}
 	if err := kv.db.Update(func(tx *bolt.Tx) error {
-		return createBuckets(
-			tx,
-			attestationsBucket,
-			blocksBucket,
-			stateBucket,
-			proposerSlashingsBucket,
-			attesterSlashingsBucket,
-			voluntaryExitsBucket,
-			chainMetadataBucket,
-			checkpointBucket,
-			powchainBucket,
-			stateSummaryBucket,
-			stateValidatorsBucket,
-			// Indices buckets.
-			attestationHeadBlockRootBucket,
-			attestationSourceRootIndicesBucket,
-			attestationSourceEpochIndicesBucket,
-			attestationTargetRootIndicesBucket,
-			attestationTargetEpochIndicesBucket,
-			blockSlotIndicesBucket,
-			stateSlotIndicesBucket,
-			blockParentRootIndicesBucket,
-			finalizedBlockRootsIndexBucket,
-			blockRootValidatorHashesBucket,
-			// State management service bucket.
-			newStateServiceCompatibleBucket,
-			// Migrations
-			migrationsBucket,
-
-			feeRecipientBucket,
-			registrationBucket,
-		)
+		return createBuckets(tx, Buckets...)
 	}); err != nil {
 		return nil, err
 	}
 	if err = prometheus.Register(createBoltCollector(kv.db)); err != nil {
 		return nil, err
 	}
-	if err = kv.checkNeedsResync(); err != nil {
+	// Setup the type of block storage used depending on whether or not this is a fresh database.
+	if err := kv.setupBlockStorageType(ctx); err != nil {
 		return nil, err
 	}
+
 	return kv, nil
 }
 
 // ClearDB removes the previously stored database in the data directory.
 func (s *Store) ClearDB() error {
+	if err := s.Close(); err != nil {
+		return fmt.Errorf("failed to close db: %w", err)
+	}
 	if _, err := os.Stat(s.databasePath); os.IsNotExist(err) {
 		return nil
 	}
@@ -228,21 +243,60 @@ func (s *Store) DatabasePath() string {
 	return s.databasePath
 }
 
-func (s *Store) checkNeedsResync() error {
-	return s.db.View(func(tx *bolt.Tx) error {
-		bkt := tx.Bucket(migrationsBucket)
-		hasDisabledFeature := !features.Get().EnableOnlyBlindedBeaconBlocks
-		if hasDisabledFeature && bkt.Get(migrationBlindedBeaconBlocksKey) != nil {
-			return fmt.Errorf(
-				"you have disabled the flag %s, and your node must resync to ensure your "+
-					"database is compatible. If you do not want to resync, please re-enable the %s flag",
-				features.EnableOnlyBlindedBeaconBlocks.Name,
-				features.EnableOnlyBlindedBeaconBlocks.Name,
-			)
+func (s *Store) setupBlockStorageType(ctx context.Context) error {
+	// We check if we want to save blinded beacon blocks by checking a key in the db
+	// otherwise, we check the last stored block and set that key in the DB if it is blinded.
+	headBlock, err := s.HeadBlock(ctx)
+	if err != nil {
+		return errors.Wrap(err, "could not get head block when setting up block storage type")
+	}
+	err = blocks.BeaconBlockIsNil(headBlock)
+	isNilBlk := err != nil
+	saveFull := features.Get().SaveFullExecutionPayloads
+
+	var saveBlinded bool
+	if err := s.db.Update(func(tx *bolt.Tx) error {
+		// If we have a key stating we wish to save blinded beacon blocks, then we set saveBlinded to true.
+		metadataBkt := tx.Bucket(chainMetadataBucket)
+		keyExists := len(metadataBkt.Get(saveBlindedBeaconBlocksKey)) > 0
+		if keyExists {
+			saveBlinded = true
+			return nil
+		}
+		// If the head block exists and is blinded, we update the key in the DB to
+		// say we wish to save all blocks as blinded.
+		if !isNilBlk && headBlock.IsBlinded() {
+			if err := metadataBkt.Put(saveBlindedBeaconBlocksKey, []byte{1}); err != nil {
+				return err
+			}
+			saveBlinded = true
+		}
+		if isNilBlk && !saveFull {
+			if err := metadataBkt.Put(saveBlindedBeaconBlocksKey, []byte{1}); err != nil {
+				return err
+			}
+			saveBlinded = true
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
 
+	// If the user wants to save full execution payloads but their database is saving blinded blocks only,
+	// we then throw an error as the node should not start.
+	if saveFull && saveBlinded {
+		return fmt.Errorf(
+			"cannot use the %s flag with this existing database, as it has already been initialized to only store "+
+				"execution payload headers (aka blinded beacon blocks). If you want to use this flag, you must re-sync your node with a fresh "+
+				"database. We recommend using checkpoint sync https://docs.prylabs.network/docs/prysm-usage/checkpoint-sync/",
+			features.SaveFullExecutionPayloads.Name,
+		)
+	}
+	if saveFull {
+		log.Warn("Saving full beacon blocks to the database. For greater disk space savings, we recommend resyncing from an empty database with " +
+			"checkpoint sync to save only blinded beacon blocks by default")
+	}
+	return nil
 }
 
 func createBuckets(tx *bolt.Tx, buckets ...[]byte) error {

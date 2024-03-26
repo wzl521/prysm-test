@@ -5,23 +5,17 @@ import (
 	"testing"
 
 	"github.com/golang/mock/gomock"
-	"github.com/prysmaticlabs/prysm/v3/config/features"
-	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v3/testing/require"
+	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/testing/require"
 )
 
 func Test_slashableAttestationCheck(t *testing.T) {
-	config := &features.Flags{
-		RemoteSlasherProtection: true,
-	}
-	reset := features.InitWithReset(config)
-	defer reset()
-	validator, m, validatorKey, finish := setup(t)
+	validator, _, validatorKey, finish := setup(t)
 	defer finish()
-	pubKey := [fieldparams.BLSPubkeyLength]byte{}
+	var pubKey [fieldparams.BLSPubkeyLength]byte
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
 	att := &ethpb.IndexedAttestation{
 		AttestingIndices: []uint64{1, 2},
@@ -40,36 +34,15 @@ func Test_slashableAttestationCheck(t *testing.T) {
 		},
 	}
 
-	m.slasherClient.EXPECT().IsSlashableAttestation(
-		gomock.Any(), // ctx
-		att,
-	).Return(&ethpb.AttesterSlashingResponse{AttesterSlashings: []*ethpb.AttesterSlashing{{
-		Attestation_1: &ethpb.IndexedAttestation{},
-		Attestation_2: &ethpb.IndexedAttestation{},
-	}}}, nil /*err*/)
-
 	err := validator.slashableAttestationCheck(context.Background(), att, pubKey, [32]byte{1})
-	require.ErrorContains(t, failedPostAttSignExternalErr, err)
-
-	m.slasherClient.EXPECT().IsSlashableAttestation(
-		gomock.Any(), // ctx
-		att,
-	).Return(&ethpb.AttesterSlashingResponse{}, nil /*err*/)
-
-	err = validator.slashableAttestationCheck(context.Background(), att, pubKey, [32]byte{1})
 	require.NoError(t, err, "Expected allowed attestation not to throw error")
 }
 
 func Test_slashableAttestationCheck_UpdatesLowestSignedEpochs(t *testing.T) {
-	config := &features.Flags{
-		RemoteSlasherProtection: true,
-	}
-	reset := features.InitWithReset(config)
-	defer reset()
 	validator, m, validatorKey, finish := setup(t)
 	defer finish()
 	ctx := context.Background()
-	pubKey := [fieldparams.BLSPubkeyLength]byte{}
+	var pubKey [fieldparams.BLSPubkeyLength]byte
 	copy(pubKey[:], validatorKey.PublicKey().Marshal())
 	att := &ethpb.IndexedAttestation{
 		AttestingIndices: []uint64{1, 2},
@@ -87,11 +60,6 @@ func Test_slashableAttestationCheck_UpdatesLowestSignedEpochs(t *testing.T) {
 			},
 		},
 	}
-
-	m.slasherClient.EXPECT().IsSlashableAttestation(
-		gomock.Any(), // ctx
-		att,
-	).Return(&ethpb.AttesterSlashingResponse{}, nil /*err*/)
 
 	m.validatorClient.EXPECT().DomainData(
 		gomock.Any(), // ctx
@@ -110,21 +78,16 @@ func Test_slashableAttestationCheck_UpdatesLowestSignedEpochs(t *testing.T) {
 	e, exists, err := validator.db.LowestSignedSourceEpoch(context.Background(), pubKey)
 	require.NoError(t, err)
 	require.Equal(t, true, exists)
-	require.Equal(t, types.Epoch(4), e)
+	require.Equal(t, primitives.Epoch(4), e)
 	e, exists, err = validator.db.LowestSignedTargetEpoch(context.Background(), pubKey)
 	require.NoError(t, err)
 	require.Equal(t, true, exists)
-	require.Equal(t, types.Epoch(10), e)
+	require.Equal(t, primitives.Epoch(10), e)
 }
 
 func Test_slashableAttestationCheck_OK(t *testing.T) {
-	config := &features.Flags{
-		RemoteSlasherProtection: true,
-	}
-	reset := features.InitWithReset(config)
-	defer reset()
 	ctx := context.Background()
-	validator, mocks, _, finish := setup(t)
+	validator, _, _, finish := setup(t)
 	defer finish()
 	att := &ethpb.IndexedAttestation{
 		AttestingIndices: []uint64{1, 2},
@@ -145,23 +108,13 @@ func Test_slashableAttestationCheck_OK(t *testing.T) {
 	sr := [32]byte{1}
 	fakePubkey := bytesutil.ToBytes48([]byte("test"))
 
-	mocks.slasherClient.EXPECT().IsSlashableAttestation(
-		gomock.Any(), // ctx
-		att,
-	).Return(&ethpb.AttesterSlashingResponse{}, nil /*err*/)
-
 	err := validator.slashableAttestationCheck(ctx, att, fakePubkey, sr)
 	require.NoError(t, err, "Expected allowed attestation not to throw error")
 }
 
 func Test_slashableAttestationCheck_GenesisEpoch(t *testing.T) {
-	config := &features.Flags{
-		RemoteSlasherProtection: true,
-	}
-	reset := features.InitWithReset(config)
-	defer reset()
 	ctx := context.Background()
-	validator, mocks, _, finish := setup(t)
+	validator, _, _, finish := setup(t)
 	defer finish()
 	att := &ethpb.IndexedAttestation{
 		AttestingIndices: []uint64{1, 2},
@@ -180,20 +133,15 @@ func Test_slashableAttestationCheck_GenesisEpoch(t *testing.T) {
 		},
 	}
 
-	mocks.slasherClient.EXPECT().IsSlashableAttestation(
-		gomock.Any(), // ctx
-		att,
-	).Return(&ethpb.AttesterSlashingResponse{}, nil /*err*/)
-
 	fakePubkey := bytesutil.ToBytes48([]byte("test"))
 	err := validator.slashableAttestationCheck(ctx, att, fakePubkey, [32]byte{})
 	require.NoError(t, err, "Expected allowed attestation not to throw error")
 	e, exists, err := validator.db.LowestSignedSourceEpoch(context.Background(), fakePubkey)
 	require.NoError(t, err)
 	require.Equal(t, true, exists)
-	require.Equal(t, types.Epoch(0), e)
+	require.Equal(t, primitives.Epoch(0), e)
 	e, exists, err = validator.db.LowestSignedTargetEpoch(context.Background(), fakePubkey)
 	require.NoError(t, err)
 	require.Equal(t, true, exists)
-	require.Equal(t, types.Epoch(0), e)
+	require.Equal(t, primitives.Epoch(0), e)
 }

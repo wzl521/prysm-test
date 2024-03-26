@@ -13,11 +13,11 @@ import (
 
 	"github.com/bazelbuild/rules_go/go/tools/bazel"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	"github.com/prysmaticlabs/prysm/v3/io/file"
-	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/helpers"
-	e2e "github.com/prysmaticlabs/prysm/v3/testing/endtoend/params"
-	e2etypes "github.com/prysmaticlabs/prysm/v3/testing/endtoend/types"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/io/file"
+	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/helpers"
+	e2e "github.com/prysmaticlabs/prysm/v5/testing/endtoend/params"
+	e2etypes "github.com/prysmaticlabs/prysm/v5/testing/endtoend/types"
 )
 
 var _ e2etypes.ComponentRunner = (*LighthouseBeaconNode)(nil)
@@ -164,7 +164,7 @@ func (node *LighthouseBeaconNode) Start(ctx context.Context) error {
 	}
 
 	_, index, _ := node.config, node.index, node.enr
-	testDir, err := node.createTestnetDir(index)
+	testDir, err := node.createTestnetDir(ctx, index)
 	if err != nil {
 		return err
 	}
@@ -178,13 +178,12 @@ func (node *LighthouseBeaconNode) Start(ctx context.Context) error {
 		fmt.Sprintf("--testnet-dir=%s", testDir),
 		"--staking",
 		"--enr-address=127.0.0.1",
-		fmt.Sprintf("--enr-udp-port=%d", e2e.TestParams.Ports.LighthouseBeaconNodeP2PPort+index),
-		fmt.Sprintf("--enr-tcp-port=%d", e2e.TestParams.Ports.LighthouseBeaconNodeP2PPort+index),
-		fmt.Sprintf("--port=%d", e2e.TestParams.Ports.LighthouseBeaconNodeP2PPort+index),
+		fmt.Sprintf("--enr-udp-port=%d", e2e.TestParams.Ports.LighthouseBeaconNodeP2PPort+index*2), // multiply by 2 because LH adds 1 for quic4 port
+		fmt.Sprintf("--enr-tcp-port=%d", e2e.TestParams.Ports.LighthouseBeaconNodeP2PPort+index*2), // multiply by 2 because LH adds 1 for quic4 port
+		fmt.Sprintf("--port=%d", e2e.TestParams.Ports.LighthouseBeaconNodeP2PPort+index*2),         // multiply by 2 because LH adds 1 for quic4 port
 		fmt.Sprintf("--http-port=%d", e2e.TestParams.Ports.LighthouseBeaconNodeHTTPPort+index),
 		fmt.Sprintf("--target-peers=%d", 10),
-		fmt.Sprintf("--eth1-endpoints=http://127.0.0.1:%d", e2e.TestParams.Ports.Eth1RPCPort+prysmNodeCount+index),
-		fmt.Sprintf("--execution-endpoints=http://127.0.0.1:%d", e2e.TestParams.Ports.Eth1ProxyPort+prysmNodeCount+index),
+		fmt.Sprintf("--execution-endpoint=http://127.0.0.1:%d", e2e.TestParams.Ports.Eth1ProxyPort+prysmNodeCount+index),
 		fmt.Sprintf("--jwt-secrets=%s", jwtPath),
 		fmt.Sprintf("--boot-nodes=%s", node.enr),
 		fmt.Sprintf("--metrics-port=%d", e2e.TestParams.Ports.LighthouseBeaconNodeMetricsPort+index),
@@ -193,39 +192,34 @@ func (node *LighthouseBeaconNode) Start(ctx context.Context) error {
 		"--http-allow-sync-stalled",
 		"--enable-private-discovery",
 		"--debug-level=debug",
-		"--merge",
+		"--suggested-fee-recipient=0x878705ba3f8bc32fcf7f4caa1a35e72af65cf766",
 	}
 	if node.config.UseFixedPeerIDs {
 		flagVal := strings.Join(node.config.PeerIDs, ",")
 		args = append(args,
 			fmt.Sprintf("--trusted-peers=%s", flagVal))
 	}
-	cmd := exec.CommandContext(ctx, binaryPath, args...) /* #nosec G204 */
-	// Write stdout and stderr to log files.
-	stdout, err := os.Create(path.Join(e2e.TestParams.LogPath, fmt.Sprintf("lighthouse_beacon_node_%d_stdout.log", index)))
-	if err != nil {
-		return err
+	if node.config.UseBuilder {
+		args = append(args, fmt.Sprintf("--builder=%s:%d", "http://127.0.0.1", e2e.TestParams.Ports.Eth1ProxyPort+prysmNodeCount+index))
 	}
+	cmd := exec.CommandContext(ctx, binaryPath, args...) /* #nosec G204 */
+	// Write stderr to log files.
 	stderr, err := os.Create(path.Join(e2e.TestParams.LogPath, fmt.Sprintf("lighthouse_beacon_node_%d_stderr.log", index)))
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if err := stdout.Close(); err != nil {
-			log.WithError(err).Error("Failed to close stdout file")
-		}
 		if err := stderr.Close(); err != nil {
 			log.WithError(err).Error("Failed to close stderr file")
 		}
 	}()
-	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	log.Infof("Starting lighthouse beacon chain %d with flags: %s", index, strings.Join(args[2:], " "))
 	if err = cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start beacon node: %w", err)
 	}
 
-	if err = helpers.WaitForTextInFile(stderr, "Configured for network"); err != nil {
+	if err = helpers.WaitForTextInFile(stderr, "Metrics HTTP server started"); err != nil {
 		return fmt.Errorf("could not find initialization for node %d, this means the node had issues starting: %w", index, err)
 	}
 
@@ -256,13 +250,10 @@ func (node *LighthouseBeaconNode) Stop() error {
 	return node.cmd.Process.Kill()
 }
 
-func (node *LighthouseBeaconNode) createTestnetDir(index int) (string, error) {
+func (node *LighthouseBeaconNode) createTestnetDir(ctx context.Context, index int) (string, error) {
 	testNetDir := e2e.TestParams.TestPath + fmt.Sprintf("/lighthouse-testnet-%d", index)
 	configPath := filepath.Join(testNetDir, "config.yaml")
-	rawYaml := params.E2EMainnetConfigYaml()
-	// Add in deposit contract in yaml
-	depContractStr := fmt.Sprintf("\nDEPOSIT_CONTRACT_ADDRESS: %#x", e2e.TestParams.ContractAddress)
-	rawYaml = append(rawYaml, []byte(depContractStr)...)
+	rawYaml := params.ConfigToYaml(params.BeaconConfig())
 
 	if err := file.MkdirAll(testNetDir); err != nil {
 		return "", err
@@ -277,5 +268,37 @@ func (node *LighthouseBeaconNode) createTestnetDir(index int) (string, error) {
 	}
 	deployPath := filepath.Join(testNetDir, "deploy_block.txt")
 	deployYaml := []byte("0")
-	return testNetDir, file.WriteFile(deployPath, deployYaml)
+	if err := file.WriteFile(deployPath, deployYaml); err != nil {
+		return "", err
+	}
+
+	return testNetDir, node.saveGenesis(ctx, testNetDir)
+}
+
+func (node *LighthouseBeaconNode) saveGenesis(ctx context.Context, testNetDir string) error {
+	// The deposit contract starts with an empty trie, we use the BeaconState to "pre-mine" the validator registry,
+	g, err := generateGenesis(ctx)
+	if err != nil {
+		return err
+	}
+
+	root, err := g.HashTreeRoot(ctx)
+	if err != nil {
+		return err
+	}
+	lbhr, err := g.LatestBlockHeader().HashTreeRoot()
+	if err != nil {
+		return err
+	}
+	log.WithField("fork_version", g.Fork().CurrentVersion).
+		WithField("latest_block_header.root", fmt.Sprintf("%#x", lbhr)).
+		WithField("state_root", fmt.Sprintf("%#x", root)).
+		Infof("BeaconState info")
+
+	genesisBytes, err := g.MarshalSSZ()
+	if err != nil {
+		return err
+	}
+	genesisPath := path.Join(testNetDir, "genesis.ssz")
+	return file.WriteFile(genesisPath, genesisBytes)
 }

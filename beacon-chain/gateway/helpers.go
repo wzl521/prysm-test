@@ -2,10 +2,10 @@ package gateway
 
 import (
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/prysmaticlabs/prysm/v3/api/gateway"
-	"github.com/prysmaticlabs/prysm/v3/cmd/beacon-chain/flags"
-	ethpbservice "github.com/prysmaticlabs/prysm/v3/proto/eth/service"
-	ethpbalpha "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/api"
+	"github.com/prysmaticlabs/prysm/v5/api/gateway"
+	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/flags"
+	ethpbalpha "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -28,7 +28,6 @@ func DefaultConfig(enableDebugRPCEndpoints bool, httpModules string) MuxConfig {
 		}
 		if enableDebugRPCEndpoints {
 			v1AlphaRegistrations = append(v1AlphaRegistrations, ethpbalpha.RegisterDebugHandler)
-
 		}
 		v1AlphaMux := gwruntime.NewServeMux(
 			gwruntime.WithMarshalerOption(gwruntime.MIMEWildcard, &gwruntime.HTTPBodyMarshaler{
@@ -42,7 +41,7 @@ func DefaultConfig(enableDebugRPCEndpoints bool, httpModules string) MuxConfig {
 				},
 			}),
 			gwruntime.WithMarshalerOption(
-				"text/event-stream", &gwruntime.EventSourceJSONPb{},
+				api.EventStreamMediaType, &gwruntime.EventSourceJSONPb{},
 			),
 		)
 		v1AlphaPbHandler = &gateway.PbMux{
@@ -52,16 +51,7 @@ func DefaultConfig(enableDebugRPCEndpoints bool, httpModules string) MuxConfig {
 		}
 	}
 	if flags.EnableHTTPEthAPI(httpModules) {
-		ethRegistrations := []gateway.PbHandlerRegistration{
-			ethpbservice.RegisterBeaconNodeHandler,
-			ethpbservice.RegisterBeaconChainHandler,
-			ethpbservice.RegisterBeaconValidatorHandler,
-			ethpbservice.RegisterEventsHandler,
-		}
-		if enableDebugRPCEndpoints {
-			ethRegistrations = append(ethRegistrations, ethpbservice.RegisterBeaconDebugHandler)
-
-		}
+		ethRegistrations := []gateway.PbHandlerRegistration{}
 		ethMux := gwruntime.NewServeMux(
 			gwruntime.WithMarshalerOption(gwruntime.MIMEWildcard, &gwruntime.HTTPBodyMarshaler{
 				Marshaler: &gwruntime.JSONPb{

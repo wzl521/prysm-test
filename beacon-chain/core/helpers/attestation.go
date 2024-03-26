@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
-	"github.com/prysmaticlabs/prysm/v3/crypto/hash"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
-	"github.com/prysmaticlabs/prysm/v3/time/slots"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/crypto/hash"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
+	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	log "github.com/sirupsen/logrus"
+)
+
+var (
+	ErrTooLate = errors.New("attestation is too late")
 )
 
 // ValidateNilAttestation checks if any composite field of input attestation is nil.
@@ -66,25 +70,6 @@ func IsAggregator(committeeCount uint64, slotSig []byte) (bool, error) {
 	return binary.LittleEndian.Uint64(b[:8])%modulo == 0, nil
 }
 
-// AggregateSignature returns the aggregated signature of the input attestations.
-//
-// Spec pseudocode definition:
-//
-//	def get_aggregate_signature(attestations: Sequence[Attestation]) -> BLSSignature:
-//	 signatures = [attestation.signature for attestation in attestations]
-//	 return bls.Aggregate(signatures)
-func AggregateSignature(attestations []*ethpb.Attestation) (bls.Signature, error) {
-	sigs := make([]bls.Signature, len(attestations))
-	var err error
-	for i := 0; i < len(sigs); i++ {
-		sigs[i], err = bls.SignatureFromBytes(attestations[i].Signature)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return bls.AggregateSignatures(sigs), nil
-}
-
 // IsAggregated returns true if the attestation is an aggregated attestation,
 // false otherwise.
 func IsAggregated(attestation *ethpb.Attestation) bool {
@@ -124,11 +109,11 @@ func ComputeSubnetForAttestation(activeValCount uint64, att *ethpb.Attestation) 
 //	committees_since_epoch_start = committees_per_slot * slots_since_epoch_start
 //
 //	return uint64((committees_since_epoch_start + committee_index) % ATTESTATION_SUBNET_COUNT)
-func ComputeSubnetFromCommitteeAndSlot(activeValCount uint64, comIdx types.CommitteeIndex, attSlot types.Slot) uint64 {
+func ComputeSubnetFromCommitteeAndSlot(activeValCount uint64, comIdx primitives.CommitteeIndex, attSlot primitives.Slot) uint64 {
 	slotSinceStart := slots.SinceEpochStarts(attSlot)
 	comCount := SlotCommitteeCount(activeValCount)
 	commsSinceStart := uint64(slotSinceStart.Mul(comCount))
-	computedSubnet := (commsSinceStart + uint64(comIdx)) % params.BeaconNetworkConfig().AttestationSubnetCount
+	computedSubnet := (commsSinceStart + uint64(comIdx)) % params.BeaconConfig().AttestationSubnetCount
 	return computedSubnet
 }
 
@@ -147,7 +132,7 @@ func ComputeSubnetFromCommitteeAndSlot(activeValCount uint64, comIdx types.Commi
 //	valid_attestation_slot = 101
 //
 // In the attestation must be within the range of 95 to 102 in the example above.
-func ValidateAttestationTime(attSlot types.Slot, genesisTime time.Time, clockDisparity time.Duration) error {
+func ValidateAttestationTime(attSlot primitives.Slot, genesisTime time.Time, clockDisparity time.Duration) error {
 	if err := slots.ValidateClock(attSlot, uint64(genesisTime.Unix())); err != nil {
 		return err
 	}
@@ -165,9 +150,9 @@ func ValidateAttestationTime(attSlot types.Slot, genesisTime time.Time, clockDis
 
 	// An attestation cannot be older than the current slot - attestation propagation slot range
 	// with a minor tolerance for peer clock disparity.
-	lowerBoundsSlot := types.Slot(0)
-	if currentSlot > params.BeaconNetworkConfig().AttestationPropagationSlotRange {
-		lowerBoundsSlot = currentSlot - params.BeaconNetworkConfig().AttestationPropagationSlotRange
+	lowerBoundsSlot := primitives.Slot(0)
+	if currentSlot > params.BeaconConfig().AttestationPropagationSlotRange {
+		lowerBoundsSlot = currentSlot - params.BeaconConfig().AttestationPropagationSlotRange
 	}
 	lowerTime, err := slots.ToTime(uint64(genesisTime.Unix()), lowerBoundsSlot)
 	if err != nil {
@@ -182,14 +167,39 @@ func ValidateAttestationTime(attSlot types.Slot, genesisTime time.Time, clockDis
 		lowerBoundsSlot,
 		currentSlot,
 	)
-	if attTime.Before(lowerBounds) {
+	if attTime.After(upperBounds) {
 		attReceivedTooEarlyCount.Inc()
 		return attError
 	}
-	if attTime.After(upperBounds) {
-		attReceivedTooLateCount.Inc()
-		return attError
+
+	attEpoch := slots.ToEpoch(attSlot)
+	if attEpoch < params.BeaconConfig().DenebForkEpoch {
+		if attTime.Before(lowerBounds) {
+			attReceivedTooLateCount.Inc()
+			return errors.Join(ErrTooLate, attError)
+		}
+		return nil
 	}
+
+	// EIP-7045: Starting in Deneb, allow any attestations from the current or previous epoch.
+
+	currentEpoch := slots.ToEpoch(currentSlot)
+	prevEpoch, err := currentEpoch.SafeSub(1)
+	if err != nil {
+		log.WithError(err).Debug("Ignoring underflow for a deneb attestation inclusion check in epoch 0")
+		prevEpoch = 0
+	}
+	attSlotEpoch := slots.ToEpoch(attSlot)
+	if attSlotEpoch != currentEpoch && attSlotEpoch != prevEpoch {
+		attError = fmt.Errorf(
+			"attestation epoch %d not within current epoch %d or previous epoch %d",
+			attSlot/params.BeaconConfig().SlotsPerEpoch,
+			currentEpoch,
+			prevEpoch,
+		)
+		return errors.Join(ErrTooLate, attError)
+	}
+
 	return nil
 }
 
@@ -198,10 +208,10 @@ func ValidateAttestationTime(attSlot types.Slot, genesisTime time.Time, clockDis
 func VerifyCheckpointEpoch(c *ethpb.Checkpoint, genesis time.Time) bool {
 	now := uint64(prysmTime.Now().Unix())
 	genesisTime := uint64(genesis.Unix())
-	currentSlot := types.Slot((now - genesisTime) / params.BeaconConfig().SecondsPerSlot)
+	currentSlot := primitives.Slot((now - genesisTime) / params.BeaconConfig().SecondsPerSlot)
 	currentEpoch := slots.ToEpoch(currentSlot)
 
-	var prevEpoch types.Epoch
+	var prevEpoch primitives.Epoch
 	if currentEpoch > 1 {
 		prevEpoch = currentEpoch - 1
 	}

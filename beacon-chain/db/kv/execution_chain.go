@@ -4,16 +4,16 @@ import (
 	"context"
 	"errors"
 
-	"github.com/prysmaticlabs/prysm/v3/monitoring/tracing"
-	v2 "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/monitoring/tracing"
+	v2 "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
 	bolt "go.etcd.io/bbolt"
 	"go.opencensus.io/trace"
 	"google.golang.org/protobuf/proto"
 )
 
-// SavePowchainData saves the pow chain data.
+// SaveExecutionChainData saves the execution chain data.
 func (s *Store) SaveExecutionChainData(ctx context.Context, data *v2.ETH1ChainData) error {
-	ctx, span := trace.StartSpan(ctx, "BeaconDB.SaveExecutionChainData")
+	_, span := trace.StartSpan(ctx, "BeaconDB.SaveExecutionChainData")
 	defer span.End()
 
 	if data == nil {
@@ -34,9 +34,9 @@ func (s *Store) SaveExecutionChainData(ctx context.Context, data *v2.ETH1ChainDa
 	return err
 }
 
-// PowchainData retrieves the powchain data.
+// ExecutionChainData retrieves the execution chain data.
 func (s *Store) ExecutionChainData(ctx context.Context) (*v2.ETH1ChainData, error) {
-	ctx, span := trace.StartSpan(ctx, "BeaconDB.ExecutionChainData")
+	_, span := trace.StartSpan(ctx, "BeaconDB.ExecutionChainData")
 	defer span.End()
 
 	var data *v2.ETH1ChainData

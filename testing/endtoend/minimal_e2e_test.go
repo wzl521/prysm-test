@@ -3,9 +3,12 @@ package endtoend
 import (
 	"testing"
 
-	"github.com/prysmaticlabs/prysm/v3/testing/endtoend/types"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/runtime/version"
+	"github.com/prysmaticlabs/prysm/v5/testing/endtoend/types"
 )
 
 func TestEndToEnd_MinimalConfig(t *testing.T) {
-	e2eMinimal(t, types.WithCheckpointSync()).run()
+	r := e2eMinimal(t, types.InitForkCfg(version.Phase0, version.Deneb, params.E2ETestConfig()), types.WithCheckpointSync())
+	r.run()
 }

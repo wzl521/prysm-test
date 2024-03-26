@@ -5,17 +5,18 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/helpers"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/time"
-	"github.com/prysmaticlabs/prysm/v3/beacon-chain/state"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
-	"github.com/prysmaticlabs/prysm/v3/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v3/consensus-types/interfaces"
-	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
-	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	"github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/attestation"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/signing"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/time"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
+	"github.com/prysmaticlabs/prysm/v5/config/params"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
+	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
+	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
+	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/attestation"
+	"github.com/prysmaticlabs/prysm/v5/runtime/version"
 	"go.opencensus.io/trace"
 )
 
@@ -24,12 +25,12 @@ import (
 func ProcessAttestationsNoVerifySignature(
 	ctx context.Context,
 	beaconState state.BeaconState,
-	b interfaces.SignedBeaconBlock,
+	b interfaces.ReadOnlyBeaconBlock,
 ) (state.BeaconState, error) {
-	if err := blocks.BeaconBlockIsNil(b); err != nil {
-		return nil, err
+	if b == nil || b.IsNil() {
+		return nil, blocks.ErrNilBeaconBlock
 	}
-	body := b.Block().Body()
+	body := b.Body()
 	var err error
 	for idx, att := range body.Attestations() {
 		beaconState, err = ProcessAttestationNoVerifySignature(ctx, beaconState, att)
@@ -81,7 +82,6 @@ func VerifyAttestationNoVerifySignature(
 
 	s := att.Data.Slot
 	minInclusionCheck := s+params.BeaconConfig().MinAttestationInclusionDelay <= beaconState.Slot()
-	epochInclusionCheck := beaconState.Slot() <= s+params.BeaconConfig().SlotsPerEpoch
 	if !minInclusionCheck {
 		return fmt.Errorf(
 			"attestation slot %d + inclusion delay %d > state slot %d",
@@ -90,13 +90,17 @@ func VerifyAttestationNoVerifySignature(
 			beaconState.Slot(),
 		)
 	}
-	if !epochInclusionCheck {
-		return fmt.Errorf(
-			"state slot %d > attestation slot %d + SLOTS_PER_EPOCH %d",
-			beaconState.Slot(),
-			s,
-			params.BeaconConfig().SlotsPerEpoch,
-		)
+
+	if beaconState.Version() < version.Deneb {
+		epochInclusionCheck := beaconState.Slot() <= s+params.BeaconConfig().SlotsPerEpoch
+		if !epochInclusionCheck {
+			return fmt.Errorf(
+				"state slot %d > attestation slot %d + SLOTS_PER_EPOCH %d",
+				beaconState.Slot(),
+				s,
+				params.BeaconConfig().SlotsPerEpoch,
+			)
+		}
 	}
 	activeValidatorCount, err := helpers.ActiveValidatorCount(ctx, beaconState, att.Data.Target.Epoch)
 	if err != nil {
@@ -185,19 +189,20 @@ func VerifyAttestationSignature(ctx context.Context, beaconState state.ReadOnlyB
 // VerifyIndexedAttestation determines the validity of an indexed attestation.
 //
 // Spec pseudocode definition:
-//  def is_valid_indexed_attestation(state: BeaconState, indexed_attestation: IndexedAttestation) -> bool:
-//    """
-//    Check if ``indexed_attestation`` is not empty, has sorted and unique indices and has a valid aggregate signature.
-//    """
-//    # Verify indices are sorted and unique
-//    indices = indexed_attestation.attesting_indices
-//    if len(indices) == 0 or not indices == sorted(set(indices)):
-//        return False
-//    # Verify aggregate signature
-//    pubkeys = [state.validators[i].pubkey for i in indices]
-//    domain = get_domain(state, DOMAIN_BEACON_ATTESTER, indexed_attestation.data.target.epoch)
-//    signing_root = compute_signing_root(indexed_attestation.data, domain)
-//    return bls.FastAggregateVerify(pubkeys, signing_root, indexed_attestation.signature)
+//
+//	def is_valid_indexed_attestation(state: BeaconState, indexed_attestation: IndexedAttestation) -> bool:
+//	  """
+//	  Check if ``indexed_attestation`` is not empty, has sorted and unique indices and has a valid aggregate signature.
+//	  """
+//	  # Verify indices are sorted and unique
+//	  indices = indexed_attestation.attesting_indices
+//	  if len(indices) == 0 or not indices == sorted(set(indices)):
+//	      return False
+//	  # Verify aggregate signature
+//	  pubkeys = [state.validators[i].pubkey for i in indices]
+//	  domain = get_domain(state, DOMAIN_BEACON_ATTESTER, indexed_attestation.data.target.epoch)
+//	  signing_root = compute_signing_root(indexed_attestation.data, domain)
+//	  return bls.FastAggregateVerify(pubkeys, signing_root, indexed_attestation.signature)
 func VerifyIndexedAttestation(ctx context.Context, beaconState state.ReadOnlyBeaconState, indexedAtt *ethpb.IndexedAttestation) error {
 	ctx, span := trace.StartSpan(ctx, "core.VerifyIndexedAttestation")
 	defer span.End()
@@ -217,7 +222,7 @@ func VerifyIndexedAttestation(ctx context.Context, beaconState state.ReadOnlyBea
 	indices := indexedAtt.AttestingIndices
 	var pubkeys []bls.PublicKey
 	for i := 0; i < len(indices); i++ {
-		pubkeyAtIdx := beaconState.PubkeyAtIndex(types.ValidatorIndex(indices[i]))
+		pubkeyAtIdx := beaconState.PubkeyAtIndex(primitives.ValidatorIndex(indices[i]))
 		pk, err := bls.PublicKeyFromBytes(pubkeyAtIdx[:])
 		if err != nil {
 			return errors.Wrap(err, "could not deserialize validator public key")

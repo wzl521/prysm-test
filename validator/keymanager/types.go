@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/prysmaticlabs/prysm/v3/async/event"
-	fieldparams "github.com/prysmaticlabs/prysm/v3/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
-	ethpbservice "github.com/prysmaticlabs/prysm/v3/proto/eth/service"
-	validatorpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1/validator-client"
+	"github.com/prysmaticlabs/prysm/v5/async/event"
+	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
+	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
+	validatorpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/validator-client"
 )
 
 // IKeymanager defines a general keymanager interface for Prysm wallets.
@@ -42,12 +41,12 @@ type Signer interface {
 type Importer interface {
 	ImportKeystores(
 		ctx context.Context, keystores []*Keystore, passwords []string,
-	) ([]*ethpbservice.ImportedKeystoreStatus, error)
+	) ([]*KeyStatus, error)
 }
 
 // Deleter can delete keystores from the keymanager.
 type Deleter interface {
-	DeleteKeystores(ctx context.Context, publicKeys [][]byte) ([]*ethpbservice.DeletedKeystoreStatus, error)
+	DeleteKeystores(ctx context.Context, publicKeys [][]byte) ([]*KeyStatus, error)
 }
 
 // KeyChangeSubscriber allows subscribing to changes made to the underlying keys.
@@ -62,16 +61,34 @@ type KeyStoreExtractor interface {
 
 // PublicKeyAdder allows adding public keys to the keymanager.
 type PublicKeyAdder interface {
-	AddPublicKeys(ctx context.Context, publicKeys [][fieldparams.BLSPubkeyLength]byte) ([]*ethpbservice.ImportedRemoteKeysStatus, error)
+	AddPublicKeys(publicKeys []string) []*KeyStatus
 }
+
+// KeyStatus is a json representation of the status fields for the keymanager apis
+type KeyStatus struct {
+	Status  KeyStatusType `json:"status"`
+	Message string        `json:"message"`
+}
+
+// KeyStatusType is a category of key status
+type KeyStatusType string
+
+const (
+	StatusImported  KeyStatusType = "IMPORTED"
+	StatusError     KeyStatusType = "ERROR"
+	StatusDuplicate KeyStatusType = "DUPLICATE"
+	StatusUnknown   KeyStatusType = "UNKNOWN"
+	StatusNotFound  KeyStatusType = "NOT_FOUND"
+	StatusDeleted   KeyStatusType = "DELETED"
+	StatusNotActive KeyStatusType = "NOT_ACTIVE"
+)
 
 // PublicKeyDeleter allows deleting public keys set in keymanager.
 type PublicKeyDeleter interface {
-	DeletePublicKeys(ctx context.Context, publicKeys [][fieldparams.BLSPubkeyLength]byte) ([]*ethpbservice.DeletedRemoteKeysStatus, error)
+	DeletePublicKeys(publicKeys []string) []*KeyStatus
 }
 
 type ListKeymanagerAccountConfig struct {
-	ShowDepositData          bool
 	ShowPrivateKeys          bool
 	WalletAccountsDir        string
 	KeymanagerConfigFileName string
@@ -83,12 +100,13 @@ type AccountLister interface {
 
 // Keystore json file representation as a Go struct.
 type Keystore struct {
-	Crypto  map[string]interface{} `json:"crypto"`
-	ID      string                 `json:"uuid"`
-	Pubkey  string                 `json:"pubkey"`
-	Version uint                   `json:"version"`
-	Name    string                 `json:"name"`
-	Path    string                 `json:"path"`
+	Crypto      map[string]interface{} `json:"crypto"`
+	ID          string                 `json:"uuid"`
+	Pubkey      string                 `json:"pubkey"`
+	Version     uint                   `json:"version"`
+	Description string                 `json:"description"`
+	Name        string                 `json:"name,omitempty"` // field deprecated in favor of description, EIP2335
+	Path        string                 `json:"path"`
 }
 
 // Kind defines an enum for either local, derived, or remote-signing
@@ -100,8 +118,6 @@ const (
 	Local Kind = iota
 	// Derived keymanager using a hierarchical-deterministic algorithm.
 	Derived
-	// Remote keymanager capable of remote-signing data.
-	Remote
 	// Web3Signer keymanager capable of signing data using a remote signer called Web3Signer.
 	Web3Signer
 )
@@ -121,8 +137,6 @@ func (k Kind) String() string {
 		// multiple directories will cause the isValid function to fail in wallet.go
 		// and may result in using a unintended wallet.
 		return "direct"
-	case Remote:
-		return "remote"
 	case Web3Signer:
 		return "web3signer"
 	default:
@@ -137,8 +151,6 @@ func ParseKind(k string) (Kind, error) {
 		return Derived, nil
 	case "direct", "imported", "local":
 		return Local, nil
-	case "remote":
-		return Remote, nil
 	case "web3signer":
 		return Web3Signer, nil
 	default:
